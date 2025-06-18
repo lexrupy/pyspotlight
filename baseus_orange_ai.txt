@@ -111,7 +111,7 @@ Packages
 sudo apt install libhidapi-hidraw0 libhidapi-libusb0
 
 Python Packages
-pip install evdev pyqt5 hid python-uinput mss Pillow
+pip install evdev pyqt5 hid python-uinput mss Pillow pyudev pystray
 
 
 permission to device (hid.HIDException: unable to open device)
@@ -120,7 +120,8 @@ sudo nano /etc/udev/rules.d/99-baseus.rules
 
 add the content:
 
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="abc8", ATTRS{idProduct}=="5027", MODE="0666"
+SUBSYSTEM=="hidraw*", ATTRS{idVendor}=="abc8", ATTRS{idProduct}=="ca08", MODE="0666"
+KERNEL=="hidraw*", ATTRS{idVendor}=="abc8", ATTRS{idProduct}=="ca08", MODE="0666"
 
 then run
 
