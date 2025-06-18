@@ -1,0 +1,154 @@
+BASEUS Orange AI presenter
+--------------------------
+
+
+button mappings:
+
++-----------+
+| [03] [01] |
+|           |[08] 
+|           |
+|   [04]    |[09]
+|           |[10]
+|   [05]    |
+|           |[06]
+|   [02]    |[07]
+|           |   
+|           |
+|           |
+|           |
+|           |
++-----------+
+
+
+
+evento HID byte 5 de acordo com os botoes a seguir
+botoes_map = {
+    97: "Botao 01 (Ok Button) Pressiona",
+    98: "Botao 01 (OK Button) Pressiona Duplo",
+    99: "Botao 01 (OK Button) Pressiona Longo",
+    100: "Botão 02 (laser) Pressiona",
+    106: "Botão 03 (PgUp) Pressiona",
+    107: "Botão 03 (PgUp) Pressiona Longo",
+    108: "Botão 04 (PgDown) Pressiona",
+    109: "Botão 04 (PgDown) Pressiona-Longo",
+    113: "Botão 05 Mouse Pressiona",
+    114: "Botão 05 Mouse Inicio Movimento - Segura",
+    115: "Botão 05 Mouse Fim Movimento - Solta",
+    116: "Botão 06 Ciclo A-B Pressiona",
+    117: "Botão 06 Ciclo B-A Pressiona",
+    118: "Botao 06 Segura",
+    119: "Botao 06 Solta",
+    122: "Botão 07 Ciclo A-B Pressiona",
+    123: "Botão 07 Ciclo B-A Pressiona",
+    124: "Botão 07 Segura",
+    125: "Botão 07 Solta",
+    103: "Botão 08 (Highlight) Pressiona",
+    104: "Botão 08 (Highlight) Segura",
+    105: "Botão 08 (Highlight) Solta",
+    120: "Botao 09 (Volume Up) Pressiona",
+    121: "Botao 10 (Volume Down) Pressiona",
+}
+
+Button 01 (Ok Button): 
+  Short Press: Tab
+  Long Press: Super-L + Tab + Alt-L
+  Double-Press: Button-Left (Click)
+
+Button 02:
+  Phisical Laser Button, no keyborard or mouse event.
+
+Button 03 (PageUp):
+  Short Press: Prior  (PageUp)
+  Long Press: Escape or Shift + F5 Followed by Meta-L + Enter
+  Double-Press: None
+
+Button 04 (PageDown):
+  Short Press: Next (PageDown)
+  Long Press: b
+  Double-Press: None
+
+Button 05 (Mouse Control Button):
+  Press + Move UP   : Mouse Y Up
+  Press + Move Down : Mouse Y Down
+  Press + Move Left : Mouse X Left
+  Press + Move Right: Mouse X Right
+
+  Press + Move UP-Right  : Mouse Y Up + X Right
+  Press + Move UP-Left   : Mouse Y Up + X Left
+  Press + Move Down-Right: Mouse Y Down + X Right
+  Press + Move Down-Left : Mouse Y Down + X Left
+
+
+Button 06 (Record Button):
+  No Keyboard/Mouse Action
+  One Click - Activate Microphone if Inactive
+  One Click - Deactivate Microphone if Active
+
+Button 07 (Translation Button):
+  No Keyboard/Mouse Action
+  One Click - Activate Microphone if Inactive
+  One Click - Deactivate Microphone if Active
+
+
+Button 08 (Highlight Button):
+  Short Press: e
+  Long Press: Control-L + p (While Pressed keep Control-L+ p pressed and activate mouse movements)
+  Release Long Press : Escape
+
+[button03 + button04 long press]
+will type some keys then the text: HTTPS://BASEUS.AIOFFICE.TD
+
+
+
+
+
+
+
+dependencies
+
+Packages
+sudo apt install libhidapi-hidraw0 libhidapi-libusb0
+
+Python Packages
+pip install evdev pyqt5 hid python-uinput mss Pillow
+
+
+permission to device (hid.HIDException: unable to open device)
+
+sudo nano /etc/udev/rules.d/99-baseus.rules
+
+add the content:
+
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="abc8", ATTRS{idProduct}=="5027", MODE="0666"
+
+then run
+
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+
+
+
+
+
+OSError: [Errno 19] Failed to open the uinput device: No such device
+
+$ lsmod | grep uinput
+> 
+$ sudo modprobe uinput
+
+$ ls -l /dev/uinput
+> crw-rw---- 1 root input 10, 223 Jun 18 21:00 /dev/uinput
+
+
+
+sudo nano /etc/modules-load.d/uinput.conf
+
+adicionar linha
+uinput
+
+
+
+$ sudo systemctl restart systemd-modules-load.service
+
+
