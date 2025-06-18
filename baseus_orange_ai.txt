@@ -111,7 +111,7 @@ Packages
 sudo apt install libhidapi-hidraw0 libhidapi-libusb0
 
 Python Packages
-pip install evdev pyqt5 hid python-uinput mss Pillow pyudev pystray
+pip install evdev pyqt5 hid python-uinput mss Pillow pyudev pystray screeninfo
 
 
 permission to device (hid.HIDException: unable to open device)
