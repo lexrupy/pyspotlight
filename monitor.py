@@ -322,7 +322,10 @@ class BaseusOrangeDotAI(BasePointerDevice):
                 if spx_is_not_running:
                     start_spx_proc(self.ctx)
             case 103:
-                command = "clear_drawing"
+                if spx_is_not_running:
+                    emit_key_press(self.ctx.ui, uinput.KEY_B)
+                else:
+                    command = "clear_drawing"
             case 104 | 114:
                 command = "start_move"
             case 105 | 115:
@@ -357,6 +360,8 @@ class BaseusOrangeDotAI(BasePointerDevice):
                 self.last_click_time_113 = now
             case 116 | 117:
                 command = "color_next"
+            case 118:
+                command = "alpha_next"
             case 120:
                 if spx_is_not_running:
                     emit_key_press(self.ctx.ui, uinput.KEY_VOLUMEUP)
@@ -369,6 +374,8 @@ class BaseusOrangeDotAI(BasePointerDevice):
                     command = "zoom_out"
             case 122 | 123:
                 command = "color_prior"
+            case 124:
+                command = "alpha_prior"
 
         if command and not spx_is_not_running:
             print(f"send command: {command}")

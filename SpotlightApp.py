@@ -8,6 +8,7 @@ import signal
 import pystray
 from pystray import MenuItem as item
 from PIL import Image, ImageDraw
+from screeninfo import get_monitors
 
 
 class PySpotlightApp:
@@ -21,6 +22,25 @@ class PySpotlightApp:
             root, text="Py-Spotlight", font=("Arial", 16, "bold")
         )
         self.title_label.pack(pady=10)
+
+        self.monitor_frame = tk.Frame(root)
+        self.monitor_frame.pack(padx=10, pady=5, anchor="w")
+
+        tk.Label(self.monitor_frame, text="Selecionar monitor:").pack(side=tk.LEFT)
+
+        self.monitor_var = tk.StringVar()
+        self.monitor_combo = tk.OptionMenu(self.monitor_frame, self.monitor_var, [])
+        self.monitor_combo.config(anchor="w", justify="left")
+        self.monitor_combo.pack(side=tk.LEFT, padx=5)
+
+        self.refresh_monitors()
+
+        self.start_button = tk.Button(
+            self.monitor_frame,
+            text="Reiniciar no monitor selecionado",
+            command=self.restart_subprocess,
+        )
+        self.start_button.pack(side=tk.LEFT, padx=5)
 
         self.log_text = scrolledtext.ScrolledText(
             root,
@@ -68,22 +88,70 @@ class PySpotlightApp:
         self.log_text.see(tk.END)
         self.log_text.config(state=tk.DISABLED)
 
+    def refresh_monitors(self):
+        self.monitors = get_monitors()
+        options = [
+            f"{i}: {m.width}x{m.height} @ {m.x},{m.y}"
+            + (" [Primário]" if m.is_primary else "")
+            for i, m in enumerate(self.monitors)
+        ]
+
+        # Calcula o maior comprimento
+        max_width = max(len(opt) for opt in options)
+
+        # Atualiza o OptionMenu
+        menu = self.monitor_combo["menu"]
+        menu.delete(0, "end")
+        for option in options:
+            menu.add_command(
+                label=option, command=lambda val=option: self.monitor_var.set(val)
+            )
+
+        self.monitor_var.set(options[0])
+
+        # Atualiza o widget com largura ideal
+        self.monitor_combo.config(width=max_width)
+
+    def restart_subprocess(self):
+        self.stop_subprocess()
+        self.start_subprocess()
+
+    def stop_subprocess(self):
+        if self.process and self.process.poll() is None:
+            try:
+                if os.name == "nt":
+                    self.process.terminate()
+                else:
+                    os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
+            except Exception as e:
+                self.append_log(f"Erro ao parar subprocesso: {e}\n")
+            self.process = None
+
     def start_subprocess(self):
         script_path = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "monitor.py"
         )
+        # Extrair índice do monitor selecionado
+        selected = self.monitor_var.get()
+        monitor_index = selected.split(":")[0] if ":" in selected else "0"
+
         self.process = subprocess.Popen(
-            [sys.executable, "-u", script_path],
+            [sys.executable, "-u", script_path, "-s", monitor_index],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            preexec_fn=os.setsid if os.name != "nt" else None,
         )
         threading.Thread(target=self.read_output, daemon=True).start()
 
     def read_output(self):
         while self.running and self.process:
-            for line in self.process.stdout:
-                if not self.running:
+            if self.process.poll() is not None:
+                break  # processo já terminou
+
+            while True:
+                line = self.process.stdout.readline()
+                if not line:
                     break
                 self.append_log(line)
 

@@ -1,8 +1,10 @@
+import os
 import sys
 import time
 import threading
 import select
 import mss
+import configparser
 from PIL import Image
 from PyQt5.QtWidgets import QApplication, QWidget, QMessageBox
 from PyQt5.QtGui import (
@@ -19,6 +21,9 @@ from PyQt5.QtGui import (
 from PyQt5.QtCore import Qt, QRect, QTimer, QPointF, QRectF
 
 DEBUG = True
+
+
+CONFIG_PATH = os.path.expanduser("~/.config/pyspotlight/config.ini")
 
 
 SPOTLIGHT_MODE = 0
@@ -40,10 +45,13 @@ def pil_to_qimage(pil_img):
 def capture_monitor_screenshot(monitor_index):
     with mss.mss() as sct:
         monitors = sct.monitors
-        if monitor_index < 1 or monitor_index >= len(monitors):
-            monitor_index = 1  # fallback para o primeiro monitor real
+        # monitor_index da GUI (0-based) → monitor_index para mss (1-based)
+        mss_index = monitor_index + 1
 
-        mon = monitors[monitor_index]
+        if mss_index < 1 or mss_index >= len(monitors):
+            mss_index = 1  # fallback para primeiro monitor real
+
+        mon = monitors[mss_index]
         sct_img = sct.grab(mon)
         img = pil_to_qimage(
             Image.frombytes("RGB", sct_img.size, sct_img.rgb).convert("RGBA")
@@ -89,6 +97,7 @@ class OverlayWindow(QWidget):
         self.zoom_max = 10.0
         self.zoom_min = 1.0
         self.overlay_alpha = 200
+        self.overlay_color = QColor(10, 10, 10, self.overlay_alpha)
         self.monitor_index = monitor_index
 
         self.laser_colors = [
@@ -116,6 +125,8 @@ class OverlayWindow(QWidget):
 
         self.cursor_pos = None  # Usado para exibir a caneta
 
+        self.load_config()
+
         self.timer = QTimer()
         self.timer.timeout.connect(self.update)
         self.timer.start(16)
@@ -123,6 +134,72 @@ class OverlayWindow(QWidget):
         self.showFullScreen()
         self.center_screen = self.geometry().center()
         QCursor.setPos(self.center_screen)
+
+    def save_config(self):
+        config = configparser.ConfigParser()
+
+        config["Overlay"] = {
+            "spot_radius": str(self.spot_radius),
+            "zoom_factor": str(self.zoom_factor),
+            "overlay_alpha": str(self.overlay_alpha),
+            "overlay_r": str(self.overlay_color.red()),
+            "overlay_g": str(self.overlay_color.green()),
+            "overlay_b": str(self.overlay_color.blue()),
+        }
+
+        config["Laser"] = {
+            "laser_index": str(self.laser_index),
+            "laser_size": str(self.laser_size),
+        }
+
+        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+        with open(CONFIG_PATH, "w") as f:
+            config.write(f)
+
+    def load_config(self):
+        config = configparser.ConfigParser()
+        if not os.path.exists(CONFIG_PATH):
+            return  # Nenhum arquivo ainda
+
+        config.read(CONFIG_PATH)
+
+        if "Overlay" in config:
+            self.spot_radius = int(
+                config["Overlay"].get("spot_radius", self.spot_radius)
+            )
+            self.zoom_factor = float(
+                config["Overlay"].get("zoom_factor", self.zoom_factor)
+            )
+            self.overlay_alpha = int(
+                config["Overlay"].get("overlay_alpha", self.overlay_alpha)
+            )
+
+            r = int(config["Overlay"].get("overlay_r", 10))
+            g = int(config["Overlay"].get("overlay_g", 10))
+            b = int(config["Overlay"].get("overlay_b", 10))
+            self.overlay_color = QColor(r, g, b, self.overlay_alpha)
+
+        if "Laser" in config:
+            self.laser_index = int(config["Laser"].get("laser_index", self.laser_index))
+            self.laser_size = int(config["Laser"].get("laser_size", self.laser_size))
+            self.pen_color = self.laser_colors[self.laser_index]
+
+    def adjust_overlay_color(self, step_color=0, step_alpha=0):
+        r = self.overlay_color.red()
+        g = self.overlay_color.green()
+        b = self.overlay_color.blue()
+        a = self.overlay_color.alpha()
+
+        if step_color != 0:
+            r = min(max(r + step_color, 0), 255)
+            g = min(max(g + step_color, 0), 255)
+            b = min(max(b + step_color, 0), 255)
+
+        a = min(max(a + step_alpha, 0), 255)
+
+        self.overlay_alpha = a  # mantém coerência com o atributo
+        self.overlay_color = QColor(r, g, b, a)
+        self.update()
 
     def switch_mode(self, step=1):
         next_mode = self.mode + step
@@ -243,8 +320,7 @@ class OverlayWindow(QWidget):
 
             else:
                 # Spotlight tradicional com overlay escuro
-                overlay = QColor(0, 0, 0, self.overlay_alpha)
-                painter.setBrush(overlay)
+                painter.setBrush(self.overlay_color)
                 painter.setPen(Qt.NoPen)
 
                 spotlight_path = QPainterPath()
@@ -405,9 +481,21 @@ class OverlayWindow(QWidget):
             else:
                 self.change_spot_radius(-1)
         elif cmd == "color_next":
-            self.next_color(+1)
+            if self.mode == SPOTLIGHT_MODE:
+                self.adjust_overlay_color(20)
+            else:
+                self.next_color(+1)
         elif cmd == "color_prior":
-            self.next_color(-1)
+            if self.mode == SPOTLIGHT_MODE:
+                self.adjust_overlay_color(-20)
+            else:
+                self.next_color(-1)
+        elif cmd == "alpha_next":
+            if self.mode == SPOTLIGHT_MODE:
+                self.adjust_overlay_color(0, 10)
+        elif cmd == "alpha_prior":
+            if self.mode == SPOTLIGHT_MODE:
+                self.adjust_overlay_color(0, -10)
         elif cmd == "clear_drawing":
             self.clear_drawing()
         elif cmd == "quit_spx":
@@ -458,7 +546,7 @@ class OverlayWindow(QWidget):
                 now - self.last_key_time < 1.0
                 and self.last_key_pressed == Qt.Key_Escape
             ):
-                QApplication.quit()
+                self.quit()
 
         if key == Qt.Key_P:
             self.capture_screenshot()
@@ -467,7 +555,12 @@ class OverlayWindow(QWidget):
         self.last_key_time = now
         self.last_key_pressed = key
 
+    def closeEvent(self, event):
+        self.save_config()
+        event.accept()
+
     def quit(self):
+        self.save_config()
         QApplication.quit()
 
 
@@ -475,9 +568,9 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
 
     screen_index = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+
     screens = QGuiApplication.screens()
-    if screen_index < 0 or screen_index >= len(screens):
-        screen_index = 0
+
     geometry = screens[screen_index].geometry()
 
     img, geometry = capture_monitor_screenshot(screen_index)
