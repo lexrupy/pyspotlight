@@ -2,11 +2,8 @@ import os
 import sys
 import time
 import threading
-import select
-import mss
 import configparser
-from PIL import Image
-from PyQt5.QtWidgets import QApplication, QWidget, QMessageBox
+from PyQt5.QtWidgets import QApplication, QWidget
 from PyQt5.QtGui import (
     QPainter,
     QColor,
@@ -14,11 +11,19 @@ from PyQt5.QtGui import (
     QCursor,
     QPainterPath,
     QGuiApplication,
-    QImage,
     QPen,
     QBrush,
 )
 from PyQt5.QtCore import Qt, QRect, QTimer, QPointF, QRectF
+
+from .utils import (
+    capture_monitor_screenshot,
+    SPOTLIGHT_MODE,
+    PEN_MODE,
+    LASER_MODE,
+    MOUSE_MODE,
+)
+
 
 DEBUG = True
 
@@ -26,54 +31,11 @@ DEBUG = True
 CONFIG_PATH = os.path.expanduser("~/.config/pyspotlight/config.ini")
 
 
-SPOTLIGHT_MODE = 0
-LASER_MODE = 1
-PEN_MODE = 2
-
-
-def log(message):
-    if DEBUG:
-        print(message)
-
-
-def pil_to_qimage(pil_img):
-    pil_img = pil_img.convert("RGBA")
-    data = pil_img.tobytes("raw", "RGBA")
-    return QImage(data, pil_img.width, pil_img.height, QImage.Format_RGBA8888)
-
-
-def capture_monitor_screenshot(monitor_index):
-    with mss.mss() as sct:
-        monitors = sct.monitors
-        # monitor_index da GUI (0-based) → monitor_index para mss (1-based)
-        mss_index = monitor_index + 1
-
-        if mss_index < 1 or mss_index >= len(monitors):
-            mss_index = 1  # fallback para primeiro monitor real
-
-        mon = monitors[mss_index]
-        sct_img = sct.grab(mon)
-        img = pil_to_qimage(
-            Image.frombytes("RGB", sct_img.size, sct_img.rgb).convert("RGBA")
-        )
-    return img, QRect(mon["left"], mon["top"], mon["width"], mon["height"])
-
-
-def ipc_listener(window: QWidget):
-    while True:
-        ready, _, _ = select.select([sys.stdin], [], [], 0.1)
-        if ready:
-            line = sys.stdin.readline()
-            if not line:
-                break
-            cmd = line.strip()
-            log(f"IPC: {cmd}")
-            window.handle_command(cmd)
-
-
-class OverlayWindow(QWidget):
-    def __init__(self, screenshot, screen_geometry, monitor_index):
+class SpotlightOverlayWindow(QWidget):
+    def __init__(self, context, screenshot, screen_geometry, monitor_index):
         super().__init__()
+
+        self.ctx = context
 
         self.setWindowFlags(
             Qt.FramelessWindowHint
@@ -131,9 +93,11 @@ class OverlayWindow(QWidget):
         self.timer.timeout.connect(self.update)
         self.timer.start(16)
 
-        self.showFullScreen()
         self.center_screen = self.geometry().center()
         QCursor.setPos(self.center_screen)
+
+    def current_mode(self):
+        return self.mode
 
     def save_config(self):
         config = configparser.ConfigParser()
@@ -201,15 +165,18 @@ class OverlayWindow(QWidget):
         self.overlay_color = QColor(r, g, b, a)
         self.update()
 
+    def set_mouse_mode(self):
+        self.mode = MOUSE_MODE
+        self.hide()
+
     def switch_mode(self, step=1):
         next_mode = self.mode + step
-        if next_mode >= 3:
-            QApplication.quit()
-            return
-
-        self.mode = next_mode % 3
-        self.capture_screenshot()
-        self.update()
+        self.mode = next_mode % 4
+        if self.mode == MOUSE_MODE:
+            self.hide()
+        else:
+            self.capture_screenshot()
+            self.update()
 
     def change_spot_radius(self, increase=1):
         if increase == 0:
@@ -250,17 +217,7 @@ class OverlayWindow(QWidget):
 
         if new_width != self.current_line_width:
             self.current_line_width = new_width
-            print(f"Largura da linha ajustada para: {self.current_line_width}")
             self.update()  # atualiza a tela para refletir a mudança, se necessário
-
-    def set_mode_by_name(self, name):
-        mode_map = {
-            "laser": LASER_MODE,
-            "spotlight": SPOTLIGHT_MODE,
-            "pen": PEN_MODE,
-        }
-        if name in mode_map:
-            self.switch_mode(mode=mode_map[name])
 
     def capture_screenshot(self):
 
@@ -276,121 +233,124 @@ class OverlayWindow(QWidget):
         self.pixmap = QPixmap.fromImage(qimage)
 
         # Mostra a janela overlay novamente
-        self.show()
+        self.showFullScreen()
+
+    def drawSpotlight(self, painter, cursor_pos):
+        if self.zoom_factor > 1.0:
+            # --- Lente com zoom sem overlay ---
+            src_size = int((self.spot_radius * 2) / self.zoom_factor)
+            half = src_size // 2
+            src_rect = QRect(
+                cursor_pos.x() - half, cursor_pos.y() - half, src_size, src_size
+            )
+            src_rect = src_rect.intersected(self.pixmap.rect())
+
+            dest_size = self.spot_radius * 2
+            dest_rect = QRect(
+                cursor_pos.x() - self.spot_radius,
+                cursor_pos.y() - self.spot_radius,
+                dest_size,
+                dest_size,
+            )
+
+            clip_path = QPainterPath()
+            clip_path.addEllipse(cursor_pos, self.spot_radius, self.spot_radius)
+            painter.setClipPath(clip_path)
+            painter.drawPixmap(dest_rect, self.pixmap, src_rect)
+            painter.setClipping(False)
+
+            # Borda translúcida ao redor da lente
+            border_color = QColor(self.laser_colors[self.laser_index])
+            border_color.setAlphaF(0.3)
+            pen = QPen(border_color, 6)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.drawEllipse(cursor_pos, self.spot_radius, self.spot_radius)
+
+        else:
+            # Spotlight tradicional com overlay escuro
+            painter.setBrush(self.overlay_color)
+            painter.setPen(Qt.NoPen)
+
+            spotlight_path = QPainterPath()
+            spotlight_path.addRect(QRectF(self.rect()))
+            spotlight_path.addEllipse(cursor_pos, self.spot_radius, self.spot_radius)
+
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.drawPath(spotlight_path)
+
+    def drawLaser(self, painter, cursor_pos):
+        # Laser pointer com sombras e círculo central
+        color = self.laser_colors[self.laser_index]
+        size = self.laser_size
+        center_x = cursor_pos.x() - size // 2
+        center_y = cursor_pos.y() - size // 2
+
+        shadow_levels = [(12, 30), (8, 60), (4, 90)]
+        for margin, alpha in shadow_levels:
+            shadow_color = QColor(color)
+            shadow_color.setAlpha(alpha)
+            painter.setBrush(shadow_color)
+            painter.setPen(Qt.NoPen)
+            painter.drawEllipse(
+                center_x - margin,
+                center_y - margin,
+                size + 2 * margin,
+                size + 2 * margin,
+            )
+
+        painter.setBrush(color)
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(center_x, center_y, size, size)
+
+    def drawLines(self, painter, cursor_pos):
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Desenha paths antigos
+        for path in self.pen_paths:
+            pen = QPen(
+                path["color"],
+                path["width"],
+                Qt.SolidLine,
+                Qt.RoundCap,
+                Qt.RoundJoin,
+            )
+            painter.setPen(pen)
+            if len(path["points"]) > 1:
+                for i in range(len(path["points"]) - 1):
+                    painter.drawLine(path["points"][i], path["points"][i + 1])
+
+        # Desenha o path atual (se estiver desenhando)
+        if self.drawing and len(self.current_path) > 1:
+            pen = QPen(
+                self.pen_color,
+                self.current_line_width,
+                Qt.SolidLine,
+                Qt.RoundCap,
+                Qt.RoundJoin,
+            )
+            painter.setPen(pen)
+            for i in range(len(self.current_path) - 1):
+                painter.drawLine(self.current_path[i], self.current_path[i + 1])
+
+        cursor_pos = self.mapFromGlobal(QCursor.pos())
+        brush = QBrush(self.pen_color)
+        painter.setBrush(brush)
+        painter.setPen(Qt.NoPen)
+        self.draw_pen_tip(painter, cursor_pos, size=self.current_line_width * 4)
 
     def paintEvent(self, event):
         painter = QPainter(self)
         cursor_pos = self.mapFromGlobal(QCursor.pos())
-
         # Fundo: sempre desenha o screenshot completo
         painter.drawPixmap(0, 0, self.pixmap)
-
         if self.mode == SPOTLIGHT_MODE:
-            if self.zoom_factor > 1.0:
-                # --- Lente com zoom sem overlay ---
-                src_size = int((self.spot_radius * 2) / self.zoom_factor)
-                half = src_size // 2
-                src_rect = QRect(
-                    cursor_pos.x() - half, cursor_pos.y() - half, src_size, src_size
-                )
-                src_rect = src_rect.intersected(self.pixmap.rect())
-
-                dest_size = self.spot_radius * 2
-                dest_rect = QRect(
-                    cursor_pos.x() - self.spot_radius,
-                    cursor_pos.y() - self.spot_radius,
-                    dest_size,
-                    dest_size,
-                )
-
-                clip_path = QPainterPath()
-                clip_path.addEllipse(cursor_pos, self.spot_radius, self.spot_radius)
-                painter.setClipPath(clip_path)
-                painter.drawPixmap(dest_rect, self.pixmap, src_rect)
-                painter.setClipping(False)
-
-                # Borda translúcida ao redor da lente
-                border_color = QColor(self.laser_colors[self.laser_index])
-                border_color.setAlphaF(0.3)
-                pen = QPen(border_color, 6)
-                painter.setPen(pen)
-                painter.setBrush(Qt.NoBrush)
-                painter.setRenderHint(QPainter.Antialiasing)
-                painter.drawEllipse(cursor_pos, self.spot_radius, self.spot_radius)
-
-            else:
-                # Spotlight tradicional com overlay escuro
-                painter.setBrush(self.overlay_color)
-                painter.setPen(Qt.NoPen)
-
-                spotlight_path = QPainterPath()
-                spotlight_path.addRect(QRectF(self.rect()))
-                spotlight_path.addEllipse(
-                    cursor_pos, self.spot_radius, self.spot_radius
-                )
-
-                painter.setRenderHint(QPainter.Antialiasing)
-                painter.drawPath(spotlight_path)
-
+            self.drawSpotlight(painter, cursor_pos)
         elif self.mode == LASER_MODE:
-            # Laser pointer com sombras e círculo central
-            color = self.laser_colors[self.laser_index]
-            size = self.laser_size
-            center_x = cursor_pos.x() - size // 2
-            center_y = cursor_pos.y() - size // 2
-
-            shadow_levels = [(12, 30), (8, 60), (4, 90)]
-            for margin, alpha in shadow_levels:
-                shadow_color = QColor(color)
-                shadow_color.setAlpha(alpha)
-                painter.setBrush(shadow_color)
-                painter.setPen(Qt.NoPen)
-                painter.drawEllipse(
-                    center_x - margin,
-                    center_y - margin,
-                    size + 2 * margin,
-                    size + 2 * margin,
-                )
-
-            painter.setBrush(color)
-            painter.setPen(Qt.NoPen)
-            painter.drawEllipse(center_x, center_y, size, size)
-
+            self.drawLaser(painter, cursor_pos)
         elif self.mode == PEN_MODE:
-            painter.setRenderHint(QPainter.Antialiasing)
-
-            # Desenha paths antigos
-            for path in self.pen_paths:
-                pen = QPen(
-                    path["color"],
-                    path["width"],
-                    Qt.SolidLine,
-                    Qt.RoundCap,
-                    Qt.RoundJoin,
-                )
-                painter.setPen(pen)
-                if len(path["points"]) > 1:
-                    for i in range(len(path["points"]) - 1):
-                        painter.drawLine(path["points"][i], path["points"][i + 1])
-
-            # Desenha o path atual (se estiver desenhando)
-            if self.drawing and len(self.current_path) > 1:
-                pen = QPen(
-                    self.pen_color,
-                    self.current_line_width,
-                    Qt.SolidLine,
-                    Qt.RoundCap,
-                    Qt.RoundJoin,
-                )
-                painter.setPen(pen)
-                for i in range(len(self.current_path) - 1):
-                    painter.drawLine(self.current_path[i], self.current_path[i + 1])
-
-            cursor_pos = self.mapFromGlobal(QCursor.pos())
-            brush = QBrush(self.pen_color)
-            painter.setBrush(brush)
-            painter.setPen(Qt.NoPen)
-            self.draw_pen_tip(painter, cursor_pos, size=self.current_line_width * 4)
+            self.drawLines(painter, cursor_pos)
 
     def draw_pen_tip(self, painter, pos, size=20):
         # Pontos do SVG com a ponta em (0, 0)
@@ -455,59 +415,6 @@ class OverlayWindow(QWidget):
             case "line_width_decrease":
                 self.current_line_width = max(self.current_line_width - 1, 1)
 
-    def handle_command(self, cmd: str):
-        # Aqui você centraliza toda a lógica de comandos IPC
-        if cmd == "next_mode":
-            self.switch_mode(+1)
-        elif cmd == "previous_mode":
-            self.switch_mode(-1)
-        elif cmd == "zoom_in":
-            if self.mode == 2:  # PEN mode não tem zoom, por exemplo
-                # Pode ignorar ou fazer algo específico
-                pass
-            else:
-                self.zoom(+1)
-        elif cmd == "zoom_out":
-            if self.mode != 2:
-                self.zoom(-1)
-        elif cmd == "increase_size":
-            if self.mode == 2:
-                self.change_line_width(+1)
-            else:
-                self.change_spot_radius(+1)
-        elif cmd == "decrease_size":
-            if self.mode == 2:
-                self.change_line_width(-1)
-            else:
-                self.change_spot_radius(-1)
-        elif cmd == "color_next":
-            if self.mode == SPOTLIGHT_MODE:
-                self.adjust_overlay_color(20)
-            else:
-                self.next_color(+1)
-        elif cmd == "color_prior":
-            if self.mode == SPOTLIGHT_MODE:
-                self.adjust_overlay_color(-20)
-            else:
-                self.next_color(-1)
-        elif cmd == "alpha_next":
-            if self.mode == SPOTLIGHT_MODE:
-                self.adjust_overlay_color(0, 10)
-        elif cmd == "alpha_prior":
-            if self.mode == SPOTLIGHT_MODE:
-                self.adjust_overlay_color(0, -10)
-        elif cmd == "clear_drawing":
-            self.clear_drawing()
-        elif cmd == "quit_spx":
-            self.quit()
-        elif cmd in ("start_move", "stop_move"):
-            self.handle_draw_command(cmd)
-        elif cmd.startswith("set_mode"):
-            _, mode_str = cmd.split(maxsplit=1)
-            self.set_mode_by_name(mode_str.strip().lower())
-        else:
-            print(f"Comando IPC desconhecido: {cmd}")
-
     def mousePressEvent(self, event):
         if self.mode == PEN_MODE:
             self.start_pen_path()
@@ -550,6 +457,9 @@ class OverlayWindow(QWidget):
 
         if key == Qt.Key_P:
             self.capture_screenshot()
+            self.update()
+        if key == Qt.Key_M:
+            self.switch_mode(step=1)
             self.update()
 
         self.last_key_time = now

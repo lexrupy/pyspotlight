@@ -1,191 +1,173 @@
-import tkinter as tk
-from tkinter import scrolledtext
-import subprocess
-import threading
 import sys
-import os
-import signal
-import pystray
-from pystray import MenuItem as item
-from PIL import Image, ImageDraw
+import threading
+from PyQt5.QtWidgets import (
+    QApplication,
+    QMainWindow,
+    QLabel,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
+    QHBoxLayout,
+    QWidget,
+    QComboBox,
+)
+from PyQt5.QtGui import QGuiApplication
+from PyQt5.QtCore import Qt
 from screeninfo import get_monitors
+from PIL import Image, ImageDraw
+from pystray import Icon, Menu, MenuItem
+from pyspotlight.appcontext import AppContext
+from pyspotlight.devices import DeviceMonitor
+from pyspotlight.spotlight import SpotlightOverlayWindow
+from pyspotlight.utils import capture_monitor_screenshot
 
 
-class PySpotlightApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Py-Spotlight")
+class PySpotlightApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Py-Spotlight")
+        self.setGeometry(100, 100, 800, 500)
+
+        self.running = True
         self.icon = None
 
-        # Criar interface
-        self.title_label = tk.Label(
-            root, text="Py-Spotlight", font=("Arial", 16, "bold")
+        self.ctx = AppContext(
+            selected_screen=0,
+            log_function=self.append_log,
         )
-        self.title_label.pack(pady=10)
+        self.create_overlay()
+        # self.spotlight_window = SpotlightOverlayWindow(self.ctx)
+        self.device_monitor = DeviceMonitor(self.ctx)
 
-        self.monitor_frame = tk.Frame(root)
-        self.monitor_frame.pack(padx=10, pady=5, anchor="w")
+        self.init_ui()
+        self.refresh_screens()
+        self.start_device_monitor()
 
-        tk.Label(self.monitor_frame, text="Selecionar monitor:").pack(side=tk.LEFT)
+    def init_ui(self):
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
 
-        self.monitor_var = tk.StringVar()
-        self.monitor_combo = tk.OptionMenu(self.monitor_frame, self.monitor_var, [])
-        self.monitor_combo.config(anchor="w", justify="left")
-        self.monitor_combo.pack(side=tk.LEFT, padx=5)
+        main_layout = QVBoxLayout(central_widget)
 
-        self.refresh_monitors()
+        title = QLabel("Py-Spotlight")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 20px; font-weight: bold;")
+        main_layout.addWidget(title)
 
-        self.start_button = tk.Button(
-            self.monitor_frame,
-            text="Reiniciar no monitor selecionado",
-            command=self.restart_subprocess,
+        self.screen_combo = QComboBox()
+        # refresh_button = QPushButton("Reiniciar no monitor selecionado")
+        # refresh_button.clicked.connect(self.change_screen)
+        self.screen_combo.currentIndexChanged.connect(self.update_selected_screen)
+
+        monitor_layout = QHBoxLayout()
+        monitor_layout.addWidget(QLabel("Selecionar monitor:"))
+        monitor_layout.addWidget(self.screen_combo)
+
+        refresh_monitors_button = QPushButton("Atualizar Monitores")
+        refresh_monitors_button.clicked.connect(self.refresh_screens)
+        monitor_layout.addWidget(refresh_monitors_button)
+        # monitor_layout.addWidget(refresh_button)
+        main_layout.addLayout(monitor_layout)
+
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setStyleSheet("background-color: black; color: lime;")
+        main_layout.addWidget(self.log_text)
+
+        button_layout = QHBoxLayout()
+        clear_button = QPushButton("Limpar Log")
+        clear_button.clicked.connect(self.clear_log)
+        hide_button = QPushButton("Ocultar")
+        hide_button.clicked.connect(self.hide_to_tray)
+        exit_button = QPushButton("Encerrar")
+        exit_button.clicked.connect(self.exit_app)
+
+        button_layout.addWidget(clear_button)
+        button_layout.addWidget(hide_button)
+        button_layout.addWidget(exit_button)
+
+        main_layout.addLayout(button_layout)
+
+    def create_overlay(self):
+        screen_index = self.ctx.selected_screen
+        screens = QGuiApplication.screens()
+        geometry = screens[screen_index].geometry()
+        screenshot, geometry = capture_monitor_screenshot(screen_index)
+
+        if self.ctx.overlay_window:
+            self.ctx.overlay_window.close()
+
+        self.ctx.overlay_window = SpotlightOverlayWindow(
+            context=self.ctx,
+            screenshot=screenshot,
+            screen_geometry=geometry,
+            monitor_index=screen_index,
         )
-        self.start_button.pack(side=tk.LEFT, padx=5)
-
-        self.log_text = scrolledtext.ScrolledText(
-            root,
-            wrap=tk.WORD,
-            height=20,
-            bg="black",
-            fg="lime",
-            insertbackground="white",
-        )
-        self.log_text.pack(padx=10, pady=5, fill=tk.BOTH, expand=True)
-        self.log_text.config(state=tk.DISABLED)
-
-        self.button_frame = tk.Frame(root)
-        self.button_frame.pack(pady=10)
-
-        self.clear_button = tk.Button(
-            self.button_frame, text="Limpar Log", command=self.clear_log
-        )
-        self.clear_button.pack(side=tk.LEFT, padx=5)
-
-        self.hide_button = tk.Button(
-            self.button_frame, text="Ocultar", command=self.hide_to_tray
-        )
-        self.hide_button.pack(side=tk.LEFT, padx=5)
-
-        self.exit_button = tk.Button(
-            self.button_frame, text="Encerrar", command=self.exit_app
-        )
-        self.exit_button.pack(side=tk.LEFT, padx=5)
-
-        self.process = None
-        self.running = True
-        self.start_subprocess()
-
-        self.root.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
+        # self.ctx.overlay_window.showFullScreen()
 
     def clear_log(self):
-        self.log_text.config(state=tk.NORMAL)
-        self.log_text.delete(1.0, tk.END)
-        self.log_text.config(state=tk.DISABLED)
+        self.log_text.clear()
 
     def append_log(self, message):
-        self.log_text.config(state=tk.NORMAL)
-        self.log_text.insert(tk.END, message)
-        self.log_text.see(tk.END)
-        self.log_text.config(state=tk.DISABLED)
+        self.log_text.append(message)
 
-    def refresh_monitors(self):
-        self.monitors = get_monitors()
-        options = [
-            f"{i}: {m.width}x{m.height} @ {m.x},{m.y}"
-            + (" [Primário]" if m.is_primary else "")
-            for i, m in enumerate(self.monitors)
-        ]
+    def refresh_screens(self):
+        current_index = self.screen_combo.currentIndex()
+        self.screens = get_monitors()
+        self.screen_combo.clear()
+        for i, m in enumerate(self.screens):
+            text = f"{i}: {m.width}x{m.height} @ {m.x},{m.y}"
+            if m.is_primary:
+                text += " [Primário]"
+            self.screen_combo.addItem(text)
+        if 0 <= current_index < self.screen_combo.count():
+            self.screen_combo.setCurrentIndex(current_index)
 
-        # Calcula o maior comprimento
-        max_width = max(len(opt) for opt in options)
+    def update_selected_screen(self):
+        idx = self.screen_combo.currentIndex()
+        self.ctx.selected_screen = idx
+        self.create_overlay()
+        self.append_log(f"🖥️ Tela selecionada: {idx}")
 
-        # Atualiza o OptionMenu
-        menu = self.monitor_combo["menu"]
-        menu.delete(0, "end")
-        for option in options:
-            menu.add_command(
-                label=option, command=lambda val=option: self.monitor_var.set(val)
+    def start_device_monitor(self):
+        self.device_monitor.monitor_usb_hotplug()
+        # Lança monitoramento dos dispositivos já conectados
+        hidraws = self.device_monitor.find_known_hidraws()
+        if hidraws:
+            for path, dev_info in hidraws:
+                cls = dev_info["CLASS"]
+                dev = cls(path, app_ctx=self.ctx)
+                threading.Thread(target=dev.monitor, daemon=True).start()
+            self.append_log("🟢 Dispositivos compatíveis encontrados e monitorados.")
+        else:
+            self.append_log("⚠️ Nenhum dispositivo compatível encontrado.")
+
+        dispositivos = self.device_monitor.find_all_event_devices_for_known()
+        if dispositivos:
+            t = threading.Thread(
+                target=self.device_monitor.prevent_key_and_mouse_events,
+                args=(dispositivos,),
+                daemon=True,
             )
-
-        self.monitor_var.set(options[0])
-
-        # Atualiza o widget com largura ideal
-        self.monitor_combo.config(width=max_width)
-
-    def restart_subprocess(self):
-        self.stop_subprocess()
-        self.start_subprocess()
-
-    def stop_subprocess(self):
-        if self.process and self.process.poll() is None:
-            try:
-                if os.name == "nt":
-                    self.process.terminate()
-                else:
-                    os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
-            except Exception as e:
-                self.append_log(f"Erro ao parar subprocesso: {e}\n")
-            self.process = None
-
-    def start_subprocess(self):
-        script_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "monitor.py"
-        )
-        # Extrair índice do monitor selecionado
-        selected = self.monitor_var.get()
-        monitor_index = selected.split(":")[0] if ":" in selected else "0"
-
-        self.process = subprocess.Popen(
-            [sys.executable, "-u", script_path, "-s", monitor_index],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            preexec_fn=os.setsid if os.name != "nt" else None,
-        )
-        threading.Thread(target=self.read_output, daemon=True).start()
-
-    def read_output(self):
-        while self.running and self.process:
-            if self.process.poll() is not None:
-                break  # processo já terminou
-
-            while True:
-                line = self.process.stdout.readline()
-                if not line:
-                    break
-                self.append_log(line)
+            t.start()
 
     def hide_to_tray(self):
-        self.root.withdraw()
+        self.hide()
         if self.icon is None:
             self.create_tray_icon()
 
     def create_tray_icon(self):
         def restore():
-            self.root.after(0, self.root.deiconify)
+            self.show()
             if self.icon:
                 self.icon.stop()
                 self.icon = None
 
         image = self.create_image()
-        self.icon = pystray.Icon("Py-Spotlight", image, "Py-Spotlight")
+        self.icon = Icon("Py-Spotlight", image, "Py-Spotlight")
+        self.icon.menu = Menu(MenuItem("Restaurar", lambda: restore()))
 
-        def run_icon():
-            self.icon.run()
-
-        threading.Thread(target=run_icon, daemon=True).start()
-
-        # Aguarde um pouco e registre o clique
-        def bind_click():
-            import time
-
-            time.sleep(0.3)
-            try:
-                self.icon._icon._on_click = lambda: restore()
-            except Exception:
-                pass
-
-        threading.Thread(target=bind_click, daemon=True).start()
+        threading.Thread(target=self.icon.run, daemon=True).start()
 
     def create_image(self):
         image = Image.new("RGB", (64, 64), "black")
@@ -197,19 +179,11 @@ class PySpotlightApp:
         self.running = False
         if self.icon:
             self.icon.stop()
-        if self.process and self.process.poll() is None:
-            try:
-                if os.name == "nt":
-                    self.process.terminate()
-                else:
-                    os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
-            except Exception:
-                pass
-        self.root.destroy()
+        QApplication.quit()
 
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = PySpotlightApp(root)
-    root.geometry("800x500")
-    root.mainloop()
+    app = QApplication(sys.argv)
+    window = PySpotlightApp()
+    window.show()
+    sys.exit(app.exec_())
