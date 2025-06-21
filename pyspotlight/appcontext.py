@@ -6,12 +6,14 @@ class AppContext:
         uid=None,
         log_function=None,
         overlay_window=None,
+        show_info_function=None,
     ):
         self._spx_proc = spx_proc
         self._selected_screen = selected_screen
         self._ui = uid
         self._log_function = log_function
         self._overlay_window = overlay_window
+        self._show_info_function = show_info_function
 
     @property
     def ui(self):
@@ -46,6 +48,14 @@ class AppContext:
         self._log_function = func
 
     @property
+    def show_info_function(self):
+        return self._show_info_function
+
+    @show_info_function.setter
+    def show_info_function(self, func):
+        self._show_info_function = func
+
+    @property
     def overlay_window(self):
         return self._overlay_window
 
@@ -56,3 +66,7 @@ class AppContext:
     def log(self, message):
         if self._log_function:
             self._log_function(message)
+
+    def show_info(self, message):
+        if self._show_info_function:
+            self._show_info_function(message)

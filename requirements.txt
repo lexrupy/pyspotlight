@@ -5,5 +5,4 @@ python-uinput
 mss 
 Pillow 
 pyudev 
-pystray 
 screeninfo

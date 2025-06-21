@@ -10,10 +10,14 @@ import threading
 
 from .baseusorangedotai import BaseusOrangeDotAI
 
+
+class GenericMouse:
+    pass
+
+
 # Lista de dispositivos conhecidos
 DEVICE_IDS = [
     {"VENDOR_ID": 0xABC8, "PRODUCT_ID": 0xCA08, "CLASS": BaseusOrangeDotAI},
-    # Adicione outros pares vendor/product aqui
 ]
 
 
@@ -22,6 +26,7 @@ class DeviceMonitor:
         self._ctx = context
         self._event_thread = None
         self._monitored_devices = set()
+        self.monitor_all_mice = False
 
     def _iniciar_bloqueio_eventos(self):
         if not self._event_thread or not self._event_thread.is_alive():
@@ -53,7 +58,9 @@ class DeviceMonitor:
                 "⚠️ Nenhum dispositivo compatível encontrado. Aguardando conexão..."
             )
 
-        dispositivos_para_bloquear = self.find_all_event_devices_for_known()
+        dispositivos_para_bloquear = self.find_all_event_devices_for_known(
+            incluir_qualquer_mouse=True
+        )
         if dispositivos_para_bloquear:
             self._iniciar_bloqueio_eventos()
 
@@ -119,10 +126,10 @@ class DeviceMonitor:
             self._ctx.log(f"⚠️ Erro ao verificar {path}: {e}")
         return False
 
-    def find_all_event_devices_for_known(self):
+    def find_all_event_devices_for_known(self, incluir_qualquer_mouse=False):
         devices = []
         for path in glob.glob("/dev/input/event*"):
-            if self.is_known_event_device(path):
+            if self.is_known_event_device(path) or incluir_qualquer_mouse:
                 try:
                     devices.append(evdev.InputDevice(path))
                     self._ctx.log(f"🟢 Encontrado device de entrada: {path}")
@@ -130,6 +137,42 @@ class DeviceMonitor:
                     self._ctx.log(f"⚠️ Erro ao acessar {path}: {e}")
         return devices
 
+    # def find_all_event_devices_for_known(self, incluir_qualquer_mouse=False):
+    #     devices = []
+    #     for path in glob.glob("/dev/input/event*"):
+    #         try:
+    #             is_known = self.is_known_event_device(path)
+    #             device = evdev.InputDevice(path)
+    #             capabilities = device.capabilities()
+    #
+    #             # Se for teclado e NÃO for um dispositivo conhecido → ignora
+    #             if not is_known and evdev.ecodes.EV_KEY in capabilities:
+    #                 keys = capabilities[evdev.ecodes.EV_KEY]
+    #                 has_regular_keys = any(
+    #                     code < 0x100 for code in keys
+    #                 )  # Teclas padrão
+    #
+    #                 if has_regular_keys:
+    #                     self._ctx.log(f"⛔ Ignorado possível teclado: {path}")
+    #                     continue  # Pula esse dispositivo
+    #
+    #             # Se não for conhecido, só adiciona se for mouse e flag estiver ativada
+    #             if not is_known:
+    #                 if incluir_qualquer_mouse:
+    #                     if evdev.ecodes.EV_REL not in capabilities:
+    #                         self._ctx.log(f"⛔ Ignorado (sem EV_REL): {path}")
+    #                         continue
+    #                     self._ctx.log(f"🟡 Incluído como mouse genérico: {path}")
+    #                 else:
+    #                     continue
+    #
+    #             devices.append(device)
+    #             self._ctx.log(f"🟢 Monitorado: {path}")
+    #
+    #         except Exception as e:
+    #             self._ctx.log(f"⚠️ Erro ao acessar {path}: {e}")
+    #     return devices
+    #
     def hotplug_callback(self, action, device):
 
         path = device.device_node
@@ -233,6 +276,8 @@ class DeviceMonitor:
                                     evdev.ecodes.BTN_RIGHT,
                                 )
                             ):
+                                self._ctx.log("mouse")
+                                self._ctx.overlay_window.notify_activity()
                                 # Repassa evento virtual
                                 self._ctx.ui.emit((event.type, event.code), event.value)
 

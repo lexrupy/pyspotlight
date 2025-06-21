@@ -17,11 +17,13 @@ from PyQt5.QtGui import (
 from PyQt5.QtCore import Qt, QRect, QTimer, QPointF, QRectF
 
 from .utils import (
+    MODE_MAP,
     capture_monitor_screenshot,
-    SPOTLIGHT_MODE,
-    PEN_MODE,
-    LASER_MODE,
-    MOUSE_MODE,
+    MODE_SPOTLIGHT,
+    MODE_PEN,
+    MODE_LASER,
+    MODE_MOUSE,
+    MODE_AUTO,
 )
 
 
@@ -47,8 +49,8 @@ class SpotlightOverlayWindow(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setCursor(Qt.BlankCursor)
 
-        self.mode = SPOTLIGHT_MODE
-        self.last_mode = SPOTLIGHT_MODE
+        self.mode = MODE_SPOTLIGHT
+        self.last_mode = MODE_SPOTLIGHT
 
         self.last_key_time = 0
         self.last_key_pressed = 0
@@ -61,6 +63,12 @@ class SpotlightOverlayWindow(QWidget):
         self.overlay_alpha = 200
         self.overlay_color = QColor(10, 10, 10, self.overlay_alpha)
         self.monitor_index = monitor_index
+
+        self.is_in_auto = False
+        self.auto_timeout_timer = QTimer()
+        self.auto_timeout_timer.setInterval(2000)  # 2 segundos
+        self.auto_timeout_timer.setSingleShot(True)
+        self.auto_timeout_timer.timeout.connect(self._return_to_mouse_mode)
 
         self.laser_colors = [
             QColor(255, 0, 0),  # Vermelho
@@ -84,6 +92,7 @@ class SpotlightOverlayWindow(QWidget):
         self.pixmap = QPixmap.fromImage(screenshot)
 
         self.pen_color = self.laser_colors[self.laser_index]
+        self.laser_color = self.laser_colors[self.laser_index]
 
         self.cursor_pos = None  # Usado para exibir a caneta
 
@@ -94,6 +103,13 @@ class SpotlightOverlayWindow(QWidget):
         self.timer.start(16)
 
         self.center_screen = self.geometry().center()
+
+    def _return_to_mouse_mode(self):
+        if self.mode != MODE_MOUSE:
+            self.switch_mode(direct_mode=MODE_MOUSE)
+
+    def display_spotlight(self):
+        self.showFullScreen()
         QCursor.setPos(self.center_screen)
 
     def current_mode(self):
@@ -114,6 +130,14 @@ class SpotlightOverlayWindow(QWidget):
         config["Laser"] = {
             "laser_index": str(self.laser_index),
             "laser_size": str(self.laser_size),
+        }
+
+        config["Pen"] = {
+            "line_width": str(self.current_line_width),
+            "pen_r": str(self.pen_color.red()),
+            "pen_g": str(self.pen_color.green()),
+            "pen_b": str(self.pen_color.blue()),
+            "pen_a": str(self.pen_color.alpha()),
         }
 
         os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
@@ -146,7 +170,17 @@ class SpotlightOverlayWindow(QWidget):
         if "Laser" in config:
             self.laser_index = int(config["Laser"].get("laser_index", self.laser_index))
             self.laser_size = int(config["Laser"].get("laser_size", self.laser_size))
-            self.pen_color = self.laser_colors[self.laser_index]
+            self.laser_color = self.laser_colors[self.laser_index]
+
+        if "Pen" in config:
+            self.current_line_width = int(
+                config["Pen"].get("line_width", self.current_line_width)
+            )
+            r = int(config["Pen"].get("pen_r", 0))
+            g = int(config["Pen"].get("pen_g", 0))
+            b = int(config["Pen"].get("pen_b", 255))
+            a = int(config["Pen"].get("pen_a", 255))
+            self.pen_color = QColor(r, g, b, a)
 
     def adjust_overlay_color(self, step_color=0, step_alpha=0):
         r = self.overlay_color.red()
@@ -165,18 +199,29 @@ class SpotlightOverlayWindow(QWidget):
         self.overlay_color = QColor(r, g, b, a)
         self.update()
 
-    def set_mouse_mode(self):
-        self.mode = MOUSE_MODE
-        self.hide()
+    def set_auto_mode(self, enabled=True):
+        self.is_in_auto = enabled
+        self.ctx.log(f"Modo Automático: {MODE_MAP[self.last_mode]}")
 
-    def switch_mode(self, step=1):
-        next_mode = self.mode + step
-        self.mode = next_mode % 4
-        if self.mode == MOUSE_MODE:
+    def switch_mode(self, step=1, direct_mode=-1):
+        if direct_mode >= 0:
+            self.mode = direct_mode
+            # self.is_in_auto = direct_mode == MODE_AUTO
+        else:
+            self.mode = (self.mode + step) % 4
+            # self.is_in_auto = False
+
+        if self.mode == MODE_MOUSE:
             self.hide()
         else:
             self.capture_screenshot()
             self.update()
+
+        if self.mode in [MODE_SPOTLIGHT, MODE_LASER, MODE_PEN]:
+            self.last_mode = self.mode
+
+        self.ctx.log(f"Modo atual: {MODE_MAP[self.mode]}")
+        self.ctx.show_info(MODE_MAP[self.mode])
 
     def change_spot_radius(self, increase=1):
         if increase == 0:
@@ -187,7 +232,7 @@ class SpotlightOverlayWindow(QWidget):
         self.update()
 
     def zoom(self, direction):
-        if self.mode == SPOTLIGHT_MODE:
+        if self.mode == MODE_SPOTLIGHT:
             if direction > 0:
                 self.zoom_factor = min(self.zoom_max, self.zoom_factor + 1.0)
             else:
@@ -197,6 +242,7 @@ class SpotlightOverlayWindow(QWidget):
     def next_color(self, step=1):
         self.laser_index = (self.laser_index + step) % len(self.laser_colors)
         self.pen_color = self.laser_colors[self.laser_index]
+        self.laser_color = self.pen_color
         self.update()
 
     def clear_drawing(self):
@@ -345,11 +391,11 @@ class SpotlightOverlayWindow(QWidget):
         cursor_pos = self.mapFromGlobal(QCursor.pos())
         # Fundo: sempre desenha o screenshot completo
         painter.drawPixmap(0, 0, self.pixmap)
-        if self.mode == SPOTLIGHT_MODE:
+        if self.mode == MODE_SPOTLIGHT:
             self.drawSpotlight(painter, cursor_pos)
-        elif self.mode == LASER_MODE:
+        elif self.mode == MODE_LASER:
             self.drawLaser(painter, cursor_pos)
-        elif self.mode == PEN_MODE:
+        elif self.mode == MODE_PEN:
             self.drawLines(painter, cursor_pos)
 
     def draw_pen_tip(self, painter, pos, size=20):
@@ -402,11 +448,11 @@ class SpotlightOverlayWindow(QWidget):
     def handle_draw_command(self, command):
         match command:
             case "start_move":
-                if self.mode == PEN_MODE:
+                if self.mode == MODE_PEN:
                     self.start_pen_path()
 
             case "stop_move":
-                if self.mode == PEN_MODE and self.drawing:
+                if self.mode == MODE_PEN and self.drawing:
                     self.finish_pen_path()
 
             case "line_width_increase":
@@ -415,18 +461,24 @@ class SpotlightOverlayWindow(QWidget):
             case "line_width_decrease":
                 self.current_line_width = max(self.current_line_width - 1, 1)
 
+    def notify_activity(self):
+        self.ctx.log("Evento Notificado")
+        if self.is_in_auto and not self.isHidden():
+            self.switch_mode(direct_mode=self.last_mode)
+            self.auto_timeout_timer.start()  # inicia contagem de 2s
+
     def mousePressEvent(self, event):
-        if self.mode == PEN_MODE:
+        if self.mode == MODE_PEN:
             self.start_pen_path()
             self.current_path.append(event.pos())
 
     def mouseMoveEvent(self, event):
-        if self.mode == PEN_MODE and self.drawing:
+        if self.mode == MODE_PEN and self.drawing:
             self.current_path.append(event.pos())
         self.update()
 
     def mouseReleaseEvent(self, event):
-        if self.mode == PEN_MODE and self.drawing:
+        if self.mode == MODE_PEN and self.drawing:
             self.finish_pen_path()
 
     # Other ShortCuts
@@ -462,6 +514,10 @@ class SpotlightOverlayWindow(QWidget):
             self.switch_mode(step=1)
             self.update()
 
+        if key == Qt.Key_A:
+            self.ctx.overlay_window.switch_mode(direct_mode=MODE_AUTO)
+            self.update()
+
         self.last_key_time = now
         self.last_key_pressed = key
 
@@ -471,22 +527,4 @@ class SpotlightOverlayWindow(QWidget):
 
     def quit(self):
         self.save_config()
-        QApplication.quit()
-
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-
-    screen_index = int(sys.argv[1]) if len(sys.argv) > 1 else 0
-
-    screens = QGuiApplication.screens()
-
-    geometry = screens[screen_index].geometry()
-
-    img, geometry = capture_monitor_screenshot(screen_index)
-    w = OverlayWindow(img, geometry, screen_index)
-
-    threading.Thread(target=ipc_listener, args=(w,), daemon=True).start()
-
-    sys.exit(app.exec_())
-    # END
+        self.hide()
