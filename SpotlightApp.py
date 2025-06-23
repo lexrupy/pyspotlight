@@ -14,7 +14,7 @@ from PyQt5.QtWidgets import (
     QMenu,
     QAction,
 )
-from PyQt5.QtGui import QGuiApplication, QPixmap, QPainter, QColor, QIcon
+from PyQt5.QtGui import QGuiApplication, QPixmap, QPainter, QColor, QIcon, QTextCursor
 from PyQt5.QtCore import Qt
 from screeninfo import get_monitors
 from pyspotlight.appcontext import AppContext
@@ -171,6 +171,7 @@ class PySpotlightApp(QMainWindow):
 
     def append_log(self, message):
         self.log_text.append(message)
+        self.log_text.moveCursor(QTextCursor.End)
 
     def open_settings(self):
         self.settings_window = SpotlightSettingsWindow(self.ctx)
@@ -201,7 +202,7 @@ class PySpotlightApp(QMainWindow):
         if hidraws:
             for path, dev_info in hidraws:
                 cls = dev_info["CLASS"]
-                dev = cls(path, app_ctx=self.ctx)
+                dev = cls(app_ctx=self.ctx, hidraw_path=path)
                 threading.Thread(target=dev.monitor, daemon=True).start()
             self.append_log("🟢 Dispositivos compatíveis encontrados e monitorados.")
         else:

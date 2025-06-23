@@ -9,6 +9,7 @@ import select
 import threading
 
 from .baseusorangedotai import BaseusOrangeDotAI
+from .generic_vrbox import VRBoxPointerDevice
 
 
 class GenericMouse:
@@ -17,7 +18,16 @@ class GenericMouse:
 
 # Lista de dispositivos conhecidos
 DEVICE_IDS = [
-    {"VENDOR_ID": 0xABC8, "PRODUCT_ID": 0xCA08, "CLASS": BaseusOrangeDotAI},
+    {
+        "VENDOR_ID": 0xABC8,
+        "PRODUCT_ID": 0xCA08,
+        "CLASS": BaseusOrangeDotAI,
+    },  # Baseus Orange Dot AI Wireless Presenter
+    {
+        "VENDOR_ID": 0x248A,
+        "PRODUCT_ID": 0x8266,
+        "CLASS": VRBoxPointerDevice,
+    },  # Generic VRBOX Controller
 ]
 
 
@@ -28,20 +38,20 @@ class DeviceMonitor:
         self._monitored_devices = set()
         self.monitor_all_mice = False
 
-    def _iniciar_bloqueio_eventos(self):
-        if not self._event_thread or not self._event_thread.is_alive():
-            devs = self.find_all_event_devices_for_known()
-            if devs:
-                self._event_thread = threading.Thread(
-                    target=self.prevent_key_and_mouse_events,
-                    args=(devs,),
-                    daemon=True,
-                )
-                self._event_thread.start()
-            else:
-                self._ctx.log(
-                    "⚠️ Nenhum dispositivo de entrada conhecido encontrado para bloquear."
-                )
+    # def _iniciar_bloqueio_eventos(self):
+    #     if not self._event_thread or not self._event_thread.is_alive():
+    #         devs = self.find_all_event_devices_for_known()
+    #         if devs:
+    #             self._event_thread = threading.Thread(
+    #                 target=self.prevent_key_and_mouse_events,
+    #                 args=(devs,),
+    #                 daemon=True,
+    #             )
+    #             self._event_thread.start()
+    #         else:
+    #             self._ctx.log(
+    #                 "⚠️ Nenhum dispositivo de entrada conhecido encontrado para bloquear."
+    #             )
 
     def start(self):
         self.monitor_usb_hotplug()
@@ -51,18 +61,19 @@ class DeviceMonitor:
         if hidraws:
             for path, dev_info in hidraws:
                 cls = dev_info["CLASS"]
-                dev = cls(path, app_ctx=self._ctx)
+                dev = cls(app_ctx=self._ctx, hidraw_path=path)
                 threading.Thread(target=dev.monitor, daemon=True).start()
         else:
             self._ctx.log(
                 "⚠️ Nenhum dispositivo compatível encontrado. Aguardando conexão..."
             )
 
-        dispositivos_para_bloquear = self.find_all_event_devices_for_known(
-            incluir_qualquer_mouse=True
-        )
-        if dispositivos_para_bloquear:
-            self._iniciar_bloqueio_eventos()
+        for dev_info in DEVICE_IDS:
+            cls = dev_info["CLASS"]
+            if hasattr(cls, "should_block_events") and cls.should_block_events():
+                threading.Thread(
+                    target=cls.block_events_thread, args=(self._ctx,), daemon=True
+                ).start()
 
         try:
             while True:
@@ -126,16 +137,31 @@ class DeviceMonitor:
             self._ctx.log(f"⚠️ Erro ao verificar {path}: {e}")
         return False
 
-    def find_all_event_devices_for_known(self, incluir_qualquer_mouse=False):
+    def find_all_event_devices_for_known(self):
         devices = []
         for path in glob.glob("/dev/input/event*"):
-            if self.is_known_event_device(path) or incluir_qualquer_mouse:
-                try:
-                    devices.append(evdev.InputDevice(path))
-                    self._ctx.log(f"🟢 Encontrado device de entrada: {path}")
-                except Exception as e:
-                    self._ctx.log(f"⚠️ Erro ao acessar {path}: {e}")
+            try:
+                if not self.is_known_event_device(path):
+                    continue
+
+                device = evdev.InputDevice(path)
+                devices.append(device)
+                self._ctx.log(f"🟢 Monitorado: {path}")
+
+            except Exception as e:
+                self._ctx.log(f"⚠️ Erro ao acessar {path}: {e}")
         return devices
+
+    # def find_all_event_devices_for_known(self, incluir_qualquer_mouse=False):
+    #     devices = []
+    #     for path in glob.glob("/dev/input/event*"):
+    #         if self.is_known_event_device(path) or incluir_qualquer_mouse:
+    #             try:
+    #                 devices.append(evdev.InputDevice(path))
+    #                 self._ctx.log(f"🟢 Encontrado device de entrada: {path}")
+    #             except Exception as e:
+    #                 self._ctx.log(f"⚠️ Erro ao acessar {path}: {e}")
+    #     return devices
 
     # def find_all_event_devices_for_known(self, incluir_qualquer_mouse=False):
     #     devices = []
@@ -152,9 +178,9 @@ class DeviceMonitor:
     #                     code < 0x100 for code in keys
     #                 )  # Teclas padrão
     #
-    #                 if has_regular_keys:
-    #                     self._ctx.log(f"⛔ Ignorado possível teclado: {path}")
-    #                     continue  # Pula esse dispositivo
+    #                 # if has_regular_keys:
+    #                 #     self._ctx.log(f"⛔ Ignorado possível teclado: {path}")
+    #                 #     continue  # Pula esse dispositivo
     #
     #             # Se não for conhecido, só adiciona se for mouse e flag estiver ativada
     #             if not is_known:
@@ -172,40 +198,86 @@ class DeviceMonitor:
     #         except Exception as e:
     #             self._ctx.log(f"⚠️ Erro ao acessar {path}: {e}")
     #     return devices
-    #
-    def hotplug_callback(self, action, device):
 
+    # def hotplug_callback(self, action, device):
+    #
+    #     path = device.device_node
+    #     if not path:
+    #         return
+    #
+    #     if action == "add":
+    #         if path.startswith("/dev/hidraw"):
+    #             if path in self._monitored_devices:
+    #                 return  # já monitorado
+    #             ok, dev_info = self.is_known_device(path)
+    #             if ok and dev_info:
+    #                 self._ctx.log(
+    #                     f"➕ Novo dispositivo HID compatível conectado: {path}"
+    #                 )
+    #                 cls = dev_info["CLASS"]
+    #                 dev = cls(app_ctx=self._ctx, hidraw_path=path)
+    #                 t = threading.Thread(target=dev.monitor, daemon=True)
+    #                 t.start()
+    #                 self._monitored_devices.add(path)
+    #
+    #         elif path.startswith("/dev/input/event"):
+    #             if self.is_known_event_device(path):
+    #                 self._ctx.log(
+    #                     f"🆕 Dispositivo de entrada compatível conectado: {path}"
+    #                 )
+    #                 # Reinicia o bloqueio de eventos se necessário
+    #                 self._iniciar_bloqueio_eventos()
+    #     elif action == "remove":
+    #         if path in self._monitored_devices:
+    #             self._ctx.log(f"➖ Dispositivo HID removido: {path}")
+    #             self._monitored_devices.remove(path)
+
+    def hotplug_callback(self, action, device):
         path = device.device_node
         if not path:
             return
 
         if action == "add":
-            if path.startswith("/dev/hidraw"):
-                if path in self._monitored_devices:
-                    return  # já monitorado
-                ok, dev_info = self.is_known_device(path)
-                if ok and dev_info:
-                    self._ctx.log(
-                        f"➕ Novo dispositivo HID compatível conectado: {path}"
-                    )
-                    cls = dev_info["CLASS"]
-                    dev = cls(path, app_ctx=self._ctx)
-                    t = threading.Thread(target=dev.monitor, daemon=True)
-                    t.start()
-                    self._monitored_devices.add(path)
+            device_info = {
+                "path": path,
+                "vendor_id": device.get("ID_VENDOR_ID"),
+                "product_id": device.get("ID_MODEL_ID"),
+                "sys_path": device.sys_path,
+                # outros dados se precisar
+            }
 
-            elif path.startswith("/dev/input/event"):
-                if self.is_known_event_device(path):
-                    self._ctx.log(
-                        f"🆕 Dispositivo de entrada compatível conectado: {path}"
-                    )
-                    # Reinicia o bloqueio de eventos se necessário
-                    self._iniciar_bloqueio_eventos()
+            # Procura qual classe casa
+            for dev in DEVICE_IDS:
+                cls = dev["CLASS"]
+                if cls.match_device(device_info):
+                    if path not in self._monitored_devices:
+                        self._ctx.log(
+                            f"➕ Novo dispositivo compatível conectado: {path}"
+                        )
+                        inst = cls.from_device_info(self._ctx, device_info)
+                        threading.Thread(target=inst.monitor, daemon=True).start()
+                        self._monitored_devices.add(path)
+                    break
+
+            # Se quiser tratar event_devices genéricos pode ficar aqui
+
         elif action == "remove":
             if path in self._monitored_devices:
-                self._ctx.log(f"➖ Dispositivo HID removido: {path}")
+                self._ctx.log(f"➖ Dispositivo removido: {path}")
                 self._monitored_devices.remove(path)
 
+    # def monitor_usb_hotplug(self):
+    #     def monitor_loop():
+    #         context = pyudev.Context()
+    #         monitor = pyudev.Monitor.from_netlink(context)
+    #         monitor.filter_by("input")
+    #         monitor.start()
+    #
+    #         for device in iter(monitor.poll, None):
+    #             action = device.action  # 'add' ou 'remove'
+    #             self.hotplug_callback(action, device)
+    #
+    #     threading.Thread(target=monitor_loop, daemon=True).start()
     def monitor_usb_hotplug(self):
         def monitor_loop():
             context = pyudev.Context()
@@ -215,7 +287,27 @@ class DeviceMonitor:
 
             for device in iter(monitor.poll, None):
                 action = device.action  # 'add' ou 'remove'
-                self.hotplug_callback(action, device)
+                if not device.device_node:
+                    continue
+
+                if action == "add":
+                    for dev_info in DEVICE_IDS:
+                        cls = dev_info["CLASS"]
+                        if cls.match_device(device):
+                            self._ctx.log(
+                                f"➕ Novo dispositivo detectado: {device.device_node}"
+                            )
+                            dev = cls(
+                                app_ctx=self._ctx, hidraw_path=None
+                            )  # ou path se necessário
+                            threading.Thread(target=dev.monitor, daemon=True).start()
+                            self._monitored_devices.add(device.device_node)
+                            break
+
+                elif action == "remove":
+                    if device.device_node in self._monitored_devices:
+                        self._ctx.log(f"➖ Dispositivo removido: {device.device_node}")
+                        self._monitored_devices.remove(device.device_node)
 
         threading.Thread(target=monitor_loop, daemon=True).start()
 

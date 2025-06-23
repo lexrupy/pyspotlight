@@ -1,11 +1,36 @@
 import time
 import uinput
+import evdev
+import select
+import subprocess
+
 
 from pyspotlight.utils import MODE_LASER, MODE_MOUSE, MODE_PEN, MODE_SPOTLIGHT
 from .pointerdevice import BasePointerDevice
 
 
 class BaseusOrangeDotAI(BasePointerDevice):
+    VENDOR_ID = "abc8"
+    PRODUCT_ID = "ca08"
+
+    def __init__(self, app_ctx, hidraw_path):
+        super().__init__(app_ctx, hidraw_path)
+        self.ctx.ui = self.create_virtual_device(name="Baseus Virtual Presenter")
+
+    @staticmethod
+    def match_device(device_info):
+        if not device_info.device_node:
+            return False
+        try:
+            output = subprocess.check_output(
+                ["udevadm", "info", "-a", "-n", device_info.device_node], text=True
+            ).lower()
+            vid = BaseusOrangeDotAI.VENDOR_ID
+            pid = BaseusOrangeDotAI.PRODUCT_ID
+            return vid in output and pid in output
+        except Exception:
+            return False
+
     def read_pacotes_completos(self, f):
         buffer = bytearray()
         while True:
@@ -102,3 +127,63 @@ class BaseusOrangeDotAI(BasePointerDevice):
             case 124:
                 if current_mode == MODE_SPOTLIGHT:
                     ow.adjust_overlay_color(0, -10)
+
+    def monitor(self):
+        if self.path:
+            try:
+                with open(self.path, "rb") as f:
+                    for pacote in self.read_pacotes_completos(f):
+                        self.processa_pacote_hid(pacote)
+            except PermissionError:
+                self.ctx.log(
+                    f"🚫 Sem permissão para acessar {self.path} (tente ajustar udev ou rodar com sudo)"
+                )
+            except KeyboardInterrupt:
+                self.ctx.log(f"\nFinalizando monitoramento de {self.path}")
+            except OSError as e:
+                if e.errno == 5:  # Input/output error
+                    self.ctx.log("Dispositivo desconectado ou erro de I/O")
+                else:
+                    self.ctx.log(f"⚠️ Erro em {self.path}: {e}")
+
+            except Exception as e:
+                self.ctx.log(f"⚠️ Erro em {self.path}: {e}")
+
+    @staticmethod
+    def should_block_events():
+        return True
+
+    @staticmethod
+    def block_events_thread(ctx):
+        devices = []
+        for path in evdev.list_devices():
+            try:
+                dev = evdev.InputDevice(path)
+                if "baseus" in dev.name.lower():
+                    dev.grab()
+                    devices.append(dev)
+                    ctx.log(f"🛑 Bloqueando eventos de: {path}")
+            except Exception as e:
+                ctx.log(f"⚠️ Erro ao bloquear {path}: {e}")
+
+        if not devices:
+            ctx.log("⚠️ Nenhum dispositivo Baseus para bloquear.")
+            return
+
+        fd_para_dev = {dev.fd: dev for dev in devices}
+        try:
+            while True:
+                r, _, _ = select.select(fd_para_dev.keys(), [], [])
+                for fd in r:
+                    try:
+                        list(fd_para_dev[fd].read())  # Descarte
+                    except Exception:
+                        pass
+        except Exception as e:
+            ctx.log(f"❌ Erro no bloqueio Baseus: {e}")
+        finally:
+            for dev in devices:
+                try:
+                    dev.ungrab()
+                except:
+                    pass

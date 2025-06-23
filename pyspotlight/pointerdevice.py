@@ -1,43 +1,26 @@
-from abc import abstractmethod
-from typing import Iterator
+import uinput
 
 
 class BasePointerDevice:
-    def __init__(self, path, app_ctx):
-        self.path = path
+    def __init__(self, app_ctx, hidraw_path=None):
+        self.path = hidraw_path
         self.ctx = app_ctx
         self.last_click_time_113 = 0
         self.double_click_interval = 0.3  # segundos para considerar duplo clique
 
-    @abstractmethod
-    def read_pacotes_completos(self, f) -> Iterator:
-        # Implement on device class
-        pass
+    @staticmethod
+    def match_device(device_info):
+        """
+        Recebe info do dispositivo (path, sysfs, etc) e retorna True se o dispositivo é deste tipo.
+        """
+        raise NotImplementedError
 
-    @abstractmethod
-    def processa_pacote_hid(self, data):
-        # Implement on device class
-        pass
-
-    def monitor(self):
-        try:
-            with open(self.path, "rb") as f:
-                for pacote in self.read_pacotes_completos(f):
-                    self.processa_pacote_hid(pacote)
-        except PermissionError:
-            self.ctx.log(
-                f"🚫 Sem permissão para acessar {self.path} (tente ajustar udev ou rodar com sudo)"
-            )
-        except KeyboardInterrupt:
-            self.ctx.log(f"\nFinalizando monitoramento de {self.path}")
-        except OSError as e:
-            if e.errno == 5:  # Input/output error
-                self.ctx.log("Dispositivo desconectado ou erro de I/O")
-            else:
-                self.ctx.log(f"⚠️ Erro em {self.path}: {e}")
-
-        except Exception as e:
-            self.ctx.log(f"⚠️ Erro em {self.path}: {e}")
+    @classmethod
+    def from_device_info(cls, app_ctx, device_info):
+        """
+        Cria a instância da classe com as informações do dispositivo.
+        """
+        return cls(app_ctx, device_info.get("path"))
 
     def emit_key_press(self, ui, key):
         ui.emit(key, 1)  # Pressiona
@@ -48,3 +31,23 @@ class BasePointerDevice:
         ui.emit(keys[1], 1)  # Pressiona segunda tecla ex: F5
         ui.emit(keys[1], 0)  # Solta segunda tecla
         ui.emit(keys[0], 0)  # Solta primeira tecla
+
+    def create_virtual_device(self, keys=None, name="Virtual Spotlight Mouse"):
+        if keys is None:
+            keys = [
+                uinput.REL_X,
+                uinput.REL_Y,
+                uinput.BTN_LEFT,
+                uinput.BTN_RIGHT,
+                uinput.KEY_B,
+                uinput.KEY_PAGEUP,
+                uinput.KEY_PAGEDOWN,
+                uinput.KEY_ESC,
+                uinput.KEY_F5,
+                uinput.KEY_SPACE,
+                uinput.KEY_LEFTSHIFT,
+                uinput.KEY_VOLUMEUP,
+                uinput.KEY_VOLUMEDOWN,
+            ]
+
+        return uinput.Device(keys, name=name)
