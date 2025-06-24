@@ -9,6 +9,26 @@ class BaseusOrangeDotAI(BasePointerDevice):
     VENDOR_ID = 0xABC8
     PRODUCT_ID = 0xCA08
 
+    def monitor(self):
+        try:
+            with open(self.path, "rb") as f:
+                for pacote in self.read_pacotes_completos(f):
+                    self.processa_pacote_hid(pacote)
+        except PermissionError:
+            print(
+                f"🚫 Sem permissão para acessar {self.path} (tente ajustar udev ou rodar com sudo)"
+            )
+        except KeyboardInterrupt:
+            print(f"\nFinalizando monitoramento de {self.path}")
+        except OSError as e:
+            if e.errno == 5:  # Input/output error
+                print("Dispositivo desconectado ou erro de I/O")
+            else:
+                print(f"⚠️ Erro em {self.path}: {e}")
+
+        except Exception as e:
+            print(f"⚠️ Erro em {self.path}: {e}")
+
     def read_pacotes_completos(self, f):
         buffer = bytearray()
         while True:
