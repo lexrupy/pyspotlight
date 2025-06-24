@@ -1,12 +1,12 @@
-from abc import abstractmethod
+from pyspotlight.utils import SingletonMeta
 
 
-class BasePointerDevice:
+class BasePointerDevice(metaclass=SingletonMeta):
     def __init__(self, app_ctx, hidraw_path):
         self.path = hidraw_path
         self.ctx = app_ctx
+        self._monitored_devices = set()
 
-    @abstractmethod
     def monitor(self):
         raise NotImplementedError
 

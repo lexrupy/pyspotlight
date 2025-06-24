@@ -1,6 +1,10 @@
 import time
 import uinput
 import subprocess
+import glob
+import evdev
+import threading
+import select
 
 from pyspotlight.utils import LASER_MODE, MOUSE_MODE, PEN_MODE, SPOTLIGHT_MODE
 from .pointerdevice import BasePointerDevice
@@ -14,6 +18,35 @@ class BaseusOrangeDotAI(BasePointerDevice):
         super().__init__(app_ctx=app_ctx, hidraw_path=hidraw_path)
         self.last_click_time_113 = 0
         self.double_click_interval = 0.3  # segundos para considerar duplo clique
+        self._event_thread = None
+
+        self.start_event_blocking()
+
+    def start_event_blocking(self):
+        if not self._event_thread or not self._event_thread.is_alive():
+            devs = self.find_all_event_devices_for_known()
+            if devs:
+                self._event_thread = threading.Thread(
+                    target=self.prevent_key_and_mouse_events,
+                    args=(devs,),
+                    daemon=True,
+                )
+                self._event_thread.start()
+            else:
+                self.ctx.log(
+                    "⚠️ Nenhum dispositivo de entrada conhecido encontrado para bloquear."
+                )
+
+    def find_all_event_devices_for_known(self):
+        devices = []
+        for path in glob.glob("/dev/input/event*"):
+            if self.__class__.is_known_device(path):
+                try:
+                    devices.append(evdev.InputDevice(path))
+                    self.ctx.log(f"🟢 Encontrado device de entrada: {path}")
+                except Exception as e:
+                    self.ctx.log(f"⚠️ Erro ao acessar {path}: {e}")
+        return devices
 
     @classmethod
     def is_known_device(cls, device_info):
@@ -145,3 +178,90 @@ class BaseusOrangeDotAI(BasePointerDevice):
             case 124:
                 if current_mode == SPOTLIGHT_MODE:
                     ow.adjust_overlay_color(0, -10)
+
+    def prevent_key_and_mouse_events(self, devices):
+        fd_para_dev = {}
+        for dev in devices:
+            try:
+                dev.grab()
+                fd_para_dev[dev.fd] = dev
+                self.ctx.log(f"🟢 Monitorado: {dev.path}")
+            except Exception as e:
+                self.ctx.log(
+                    f"❌ Erro ao monitorar dispositivo {dev.path}: {e}. Tente executar como root ou ajuste as regras udev."
+                )
+        self.ctx.log("🟢 Monitorando dispositivos...")
+
+        if hasattr(self.ctx, "ui") and self.ctx.ui:
+            try:
+                self.ctx.log("ℹ️ Interface uinput anterior substituída.")
+                self.ctx.ui.close()  # Fecha explicitamente, mesmo não sendo obrigatório
+            except Exception as e:
+                self.ctx.log(f"⚠️ Erro ao fechar uinput anterior: {e}")
+
+        self.ctx.ui = uinput.Device(
+            [
+                uinput.REL_X,
+                uinput.REL_Y,
+                uinput.BTN_LEFT,
+                uinput.BTN_RIGHT,
+                uinput.KEY_B,
+                uinput.KEY_PAGEUP,
+                uinput.KEY_PAGEDOWN,
+                uinput.KEY_ESC,
+                # uinput.KEY_LEFTCTRL,
+                uinput.KEY_F5,
+                uinput.KEY_SPACE,
+                uinput.KEY_LEFTSHIFT,
+                uinput.KEY_VOLUMEUP,
+                uinput.KEY_VOLUMEDOWN,
+            ],
+            name="Virtual Spotlight Mouse",
+        )
+
+        try:
+            while True:
+                r, _, _ = select.select(fd_para_dev, [], [])
+                for fd in r:
+                    dev = fd_para_dev.get(fd)
+                    if dev is None:
+                        continue
+                    try:
+                        for event in dev.read():
+                            if event.type == evdev.ecodes.EV_REL or (
+                                event.type == evdev.ecodes.EV_KEY
+                                and event.code
+                                in (
+                                    evdev.ecodes.BTN_LEFT,
+                                    evdev.ecodes.BTN_RIGHT,
+                                )
+                            ):
+                                # Repassa evento virtual
+                                self.ctx.ui.emit((event.type, event.code), event.value)
+
+                    except OSError as e:
+                        if e.errno == 19:  # No such device
+                            self.ctx.log(f"⚠️ Dispositivo desconectado: {dev.path}")
+                            # Remove dispositivo da lista para não monitorar mais
+                            fd_para_dev.pop(fd, None)
+                            try:
+                                dev.ungrab()
+                            except Exception:
+                                pass
+                            # Opcional: se não há mais dispositivos, pode encerrar ou esperar
+                            if not fd_para_dev:
+                                self.ctx.log(
+                                    "Nenhum dispositivo restante para monitorar. Encerrando thread."
+                                )
+                                return
+                        else:
+                            raise
+
+        except KeyboardInterrupt:
+            self.ctx.log("\n⏹️ Encerrando monitoramento.")
+        finally:
+            for dev in devices:
+                try:
+                    dev.ungrab()
+                except Exception:
+                    pass

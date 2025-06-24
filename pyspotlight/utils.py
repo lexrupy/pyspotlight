@@ -19,6 +19,15 @@ MODE_MAP = {
 }
 
 
+class SingletonMeta(type):
+    _instance = None
+
+    def __call__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__call__(*args, **kwargs)
+        return cls._instance
+
+
 def pil_to_qimage(pil_img):
     pil_img = pil_img.convert("RGBA")
     data = pil_img.tobytes("raw", "RGBA")
