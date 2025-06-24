@@ -9,6 +9,11 @@ class BaseusOrangeDotAI(BasePointerDevice):
     VENDOR_ID = 0xABC8
     PRODUCT_ID = 0xCA08
 
+    def __init__(self, app_ctx, hidraw_path):
+        super().__init__(app_ctx=app_ctx, hidraw_path=hidraw_path)
+        self.last_click_time_113 = 0
+        self.double_click_interval = 0.3  # segundos para considerar duplo clique
+
     def monitor(self):
         try:
             with open(self.path, "rb") as f:

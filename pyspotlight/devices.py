@@ -24,7 +24,6 @@ DEVICE_CLASSES = {
 class DeviceMonitor:
     def __init__(self, context):
         self._ctx = context
-        self._event_thread = None
         self._monitored_devices = set()
 
     def _iniciar_bloqueio_eventos(self):
@@ -49,7 +48,7 @@ class DeviceMonitor:
         hidraws = self.find_known_hidraws()
         if hidraws:
             for path, cls in hidraws:
-                dev = cls(path, app_ctx=self._ctx)
+                dev = cls(app_ctx=self._ctx, hidraw_path=path)
                 threading.Thread(target=dev.monitor, daemon=True).start()
         else:
             self._ctx.log(
@@ -74,7 +73,7 @@ class DeviceMonitor:
         hidraws = self.find_known_hidraws()
         if hidraws:
             for path, cls in hidraws:
-                dev = cls(path, app_ctx=self._ctx)
+                dev = cls(app_ctx=self._ctx, hidraw_path=path)
                 threading.Thread(target=dev.monitor, daemon=True).start()
             self._ctx.log("🟢 Dispositivos compatíveis encontrados e monitorados.")
         else:
@@ -169,7 +168,7 @@ class DeviceMonitor:
                     self._ctx.log(
                         f"➕ Novo dispositivo HID compatível conectado: {path}"
                     )
-                    dev = cls(path, app_ctx=self._ctx)
+                    dev = cls(app_ctx=self._ctx, hidraw_path=path)
                     t = threading.Thread(target=dev.monitor, daemon=True)
                     t.start()
                     self._monitored_devices.add(path)

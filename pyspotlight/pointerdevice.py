@@ -2,11 +2,9 @@ from abc import abstractmethod
 
 
 class BasePointerDevice:
-    def __init__(self, path, app_ctx):
-        self.path = path
+    def __init__(self, app_ctx, hidraw_path):
+        self.path = hidraw_path
         self.ctx = app_ctx
-        self.last_click_time_113 = 0
-        self.double_click_interval = 0.3  # segundos para considerar duplo clique
 
     @abstractmethod
     def monitor(self):
