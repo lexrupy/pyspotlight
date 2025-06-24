@@ -10,6 +10,10 @@ class BasePointerDevice:
     def monitor(self):
         raise NotImplementedError
 
+    @classmethod
+    def is_known_device(cls, device_info):
+        raise NotImplementedError
+
     def emit_key_press(self, ui, key):
         ui.emit(key, 1)  # Pressiona
         ui.emit(key, 0)  # Solta

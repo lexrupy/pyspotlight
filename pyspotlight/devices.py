@@ -88,26 +88,12 @@ class DeviceMonitor:
             )
             t.start()
 
-    def is_known_device(self, hidraw_path):
-        try:
-            output = subprocess.check_output(
-                ["udevadm", "info", "-a", "-n", hidraw_path], text=True
-            ).lower()
-            for cls in DEVICE_CLASSES:
-                vid = f"{cls.VENDOR_ID:04x}"
-                pid = f"{cls.PRODUCT_ID:04x}"
-                if vid in output and pid in output:
-                    return True, cls
-            return False, None
-        except subprocess.CalledProcessError:
-            return False, None
-
     def find_known_hidraws(self):
         devices = []
         for path in glob.glob("/dev/hidraw*"):
-            ok, dev_cls = self.is_known_device(path)
-            if ok:
-                devices.append((path, dev_cls))
+            for cls in DEVICE_CLASSES:
+                if cls.is_known_device(path):
+                    devices.append((path, cls))
         return devices
 
     def find_evdev_path_from_hidraw(self, hidraw_path):
@@ -128,29 +114,16 @@ class DeviceMonitor:
         except Exception:
             return None
 
-    def is_known_event_device(self, path):
-        try:
-            output = subprocess.check_output(
-                ["udevadm", "info", "-a", "-n", path], text=True
-            ).lower()
-            for cls in DEVICE_CLASSES:
-                vid = f"{cls.VENDOR_ID:04x}"
-                pid = f"{cls.PRODUCT_ID:04x}"
-                if vid in output and pid in output:
-                    return True
-        except Exception as e:
-            self._ctx.log(f"⚠️ Erro ao verificar {path}: {e}")
-        return False
-
     def find_all_event_devices_for_known(self):
         devices = []
         for path in glob.glob("/dev/input/event*"):
-            if self.is_known_event_device(path):
-                try:
-                    devices.append(evdev.InputDevice(path))
-                    self._ctx.log(f"🟢 Encontrado device de entrada: {path}")
-                except Exception as e:
-                    self._ctx.log(f"⚠️ Erro ao acessar {path}: {e}")
+            for cls in DEVICE_CLASSES:
+                if cls.is_known_device(path):
+                    try:
+                        devices.append(evdev.InputDevice(path))
+                        self._ctx.log(f"🟢 Encontrado device de entrada: {path}")
+                    except Exception as e:
+                        self._ctx.log(f"⚠️ Erro ao acessar {path}: {e}")
         return devices
 
     def hotplug_callback(self, action, device):
@@ -163,23 +136,24 @@ class DeviceMonitor:
             if path.startswith("/dev/hidraw"):
                 if path in self._monitored_devices:
                     return  # já monitorado
-                ok, cls = self.is_known_device(path)
-                if ok and cls:
-                    self._ctx.log(
-                        f"➕ Novo dispositivo HID compatível conectado: {path}"
-                    )
-                    dev = cls(app_ctx=self._ctx, hidraw_path=path)
-                    t = threading.Thread(target=dev.monitor, daemon=True)
-                    t.start()
-                    self._monitored_devices.add(path)
+                for cls in DEVICE_CLASSES:
+                    if cls.is_known_device(path):
+                        self._ctx.log(
+                            f"➕ Novo dispositivo HID compatível conectado: {path}"
+                        )
+                        dev = cls(app_ctx=self._ctx, hidraw_path=path)
+                        t = threading.Thread(target=dev.monitor, daemon=True)
+                        t.start()
+                        self._monitored_devices.add(path)
 
             elif path.startswith("/dev/input/event"):
-                if self.is_known_event_device(path):
-                    self._ctx.log(
-                        f"🆕 Dispositivo de entrada compatível conectado: {path}"
-                    )
-                    # Reinicia o bloqueio de eventos se necessário
-                    self._iniciar_bloqueio_eventos()
+                for cls in DEVICE_CLASSES:
+                    if cls.is_known_device(path):
+                        self._ctx.log(
+                            f"🆕 Dispositivo de entrada compatível conectado: {path}"
+                        )
+                        # Reinicia o bloqueio de eventos se necessário
+                        self._iniciar_bloqueio_eventos()
         elif action == "remove":
             if path in self._monitored_devices:
                 self._ctx.log(f"➖ Dispositivo HID removido: {path}")

@@ -1,5 +1,6 @@
 import time
 import uinput
+import subprocess
 
 from pyspotlight.utils import LASER_MODE, MOUSE_MODE, PEN_MODE, SPOTLIGHT_MODE
 from .pointerdevice import BasePointerDevice
@@ -13,6 +14,20 @@ class BaseusOrangeDotAI(BasePointerDevice):
         super().__init__(app_ctx=app_ctx, hidraw_path=hidraw_path)
         self.last_click_time_113 = 0
         self.double_click_interval = 0.3  # segundos para considerar duplo clique
+
+    @classmethod
+    def is_known_device(cls, device_info):
+        try:
+            output = subprocess.check_output(
+                ["udevadm", "info", "-a", "-n", device_info], text=True
+            ).lower()
+            vid = f"{cls.VENDOR_ID:04x}"
+            pid = f"{cls.PRODUCT_ID:04x}"
+            if vid in output and pid in output:
+                return True
+            return False
+        except subprocess.CalledProcessError:
+            return False
 
     def monitor(self):
         try:
