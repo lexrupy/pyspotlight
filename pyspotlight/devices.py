@@ -1,5 +1,5 @@
+import os
 import pyudev
-import time
 import glob
 import threading
 
@@ -15,29 +15,76 @@ DEVICE_CLASSES = {
 class DeviceMonitor:
     def __init__(self, context):
         self._ctx = context
-        self._monitored_devices = set()
+        self._monitored_devices = {}
+        self._hotplug_callbacks = []
 
     def start_monitoring(self):
         self.monitor_usb_hotplug()
         # Lança monitoramento dos dispositivos já conectados
-        hidraws = self.find_known_hidraws()
+        hidraws = self.find_known_devices()
         if hidraws:
             for path, cls in hidraws:
-                dev = cls(app_ctx=self._ctx, hidraw_path=path)
-                threading.Thread(target=dev.monitor, daemon=True).start()
-                self._monitored_devices.add(path)
-            self._ctx.log("🟢 Dispositivos compatíveis encontrados e monitorados.")
+                self.add_monitored_device(cls, path)
         else:
-            self._ctx.log("⚠️ Nenhum dispositivo compatível encontrado.")
+            self._ctx.log("* Nenhum dispositivo compatível encontrado.")
 
-        self._ctx.log(str(self._monitored_devices))
+    def add_monitored_device(self, cls, path=None):
+        if cls not in self._monitored_devices:
+            dev = cls(app_ctx=self._ctx, hidraw_path=path)
+            threading.Thread(target=dev.monitor, daemon=True).start()
+            self._monitored_devices[cls] = dev
+            self._notify_callbacks()
+            self._ctx.log(f"Adicionando dispositivo: {cls.__name__} com path {path}")
+        else:
+            dev = self._monitored_devices[cls]
+            dev.add_known_path(path)
+            self._ctx.log(
+                f"Dispositivo {cls.__name__} já monitorado, adicionando path: {path}"
+            )
 
-    def find_known_hidraws(self):
+    def remove_monitored_device(self, dev):
+        # Encontra a classe correspondente à instância
+        for cls, inst in list(self._monitored_devices.items()):
+            if inst is dev:
+                del self._monitored_devices[cls]
+                break
+        self._notify_callbacks()
+
+    def remove_monitored_device_path(self, path):
+        for dev in self.get_monitored_devices():
+            if path in dev._known_paths:
+                self._ctx.log(f"- Removendo path {path} do dispositivo {dev}")
+                dev._known_paths.remove(path)
+                if not dev._known_paths:
+                    self._ctx.log(
+                        f"* Nenhum dispositivo restante para monitorar. Encerrando thread."
+                    )
+                    self.remove_monitored_device(dev)
+                break
+
+    def get_monitored_devices(self):
+        return list(self._monitored_devices.values())
+
+    def register_hotplug_callback(self, callback):
+        self._hotplug_callbacks.append(callback)
+
+    def _notify_callbacks(self):
+        for cb in self._hotplug_callbacks:
+            cb()
+
+    def find_known_devices(self):
         devices = []
         for path in glob.glob("/dev/hidraw*"):
             for cls in DEVICE_CLASSES:
                 if cls.is_known_device(path):
                     devices.append((path, cls))
+        for path in glob.glob("/dev/input/*"):
+            if not os.path.isfile(path):
+                continue
+            for cls in DEVICE_CLASSES:
+                if cls.is_known_device(path):
+                    devices.append((path, cls))
+
         return devices
 
     def hotplug_callback(self, action, device):
@@ -47,22 +94,22 @@ class DeviceMonitor:
 
         if action == "add":
             if path.startswith("/dev/hidraw") or path.startswith("/dev/input"):
-                if path in self._monitored_devices:
-                    return  # já monitorado
+                for dev in self.get_monitored_devices():
+                    if dev.known_path(path):
+                        return  # já monitorado
                 for cls in DEVICE_CLASSES:
                     if cls.is_known_device(path):
                         self._ctx.log(
-                            f"➕ Novo dispositivo HID compatível conectado: {path}"
+                            f"+ Novo dispositivo compatível conectado: {path}"
                         )
-                        dev = cls(app_ctx=self._ctx, hidraw_path=path)
-                        t = threading.Thread(target=dev.monitor, daemon=True)
-                        t.start()
-                        self._monitored_devices.add(path)
-
+                        self.add_monitored_device(cls, path)
         elif action == "remove":
-            if path in self._monitored_devices:
-                self._ctx.log(f"➖ Dispositivo HID removido: {path}")
-                self._monitored_devices.remove(path)
+            for dev in self.get_monitored_devices():
+                self._ctx.log(
+                    f"Verificando dispositivo {dev.__class__.__name__} com paths {dev._known_paths}"
+                )
+                if dev.known_path(path):
+                    self.remove_monitored_device_path(path)
 
     def monitor_usb_hotplug(self):
         def monitor_loop():

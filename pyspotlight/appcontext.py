@@ -1,17 +1,38 @@
+import uinput
+
+
 class AppContext:
     def __init__(
         self,
         spx_proc=None,
         selected_screen=0,
-        uid=None,
         log_function=None,
         overlay_window=None,
     ):
         self._spx_proc = spx_proc
         self._selected_screen = selected_screen
-        self._ui = uid
         self._log_function = log_function
         self._overlay_window = overlay_window
+
+        self._ui = uinput.Device(
+            [
+                uinput.REL_X,
+                uinput.REL_Y,
+                uinput.BTN_LEFT,
+                uinput.BTN_RIGHT,
+                uinput.KEY_B,
+                uinput.KEY_PAGEUP,
+                uinput.KEY_PAGEDOWN,
+                uinput.KEY_ESC,
+                # uinput.KEY_LEFTCTRL,
+                uinput.KEY_F5,
+                uinput.KEY_SPACE,
+                uinput.KEY_LEFTSHIFT,
+                uinput.KEY_VOLUMEUP,
+                uinput.KEY_VOLUMEDOWN,
+            ],
+            name="Virtual Spotlight Mouse",
+        )
 
     @property
     def ui(self):

@@ -24,6 +24,7 @@ from pyspotlight.utils import capture_monitor_screenshot
 
 class PySpotlightApp(QMainWindow):
     log_signal = pyqtSignal(str)
+    refresh_devices_signal = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -45,6 +46,12 @@ class PySpotlightApp(QMainWindow):
         self.init_ui()
         self.refresh_screens()
         self.device_monitor.start_monitoring()
+        self.refresh_devices_signal.connect(self.refresh_devices_combo)
+        self.device_monitor.register_hotplug_callback(self.emit_refresh_devices_signal)
+        self.refresh_devices_combo()
+
+    def emit_refresh_devices_signal(self):
+        self.refresh_devices_signal.emit()
 
     def init_ui(self):
         central_widget = QWidget()
@@ -72,6 +79,13 @@ class PySpotlightApp(QMainWindow):
         # monitor_layout.addWidget(refresh_button)
         main_layout.addLayout(monitor_layout)
 
+        self.device_combo = QComboBox()
+        self.device_combo_label = QLabel("Dispositivos Monitorados:")
+        self.device_combo_label.setAlignment(Qt.AlignLeft)
+
+        main_layout.addWidget(self.device_combo_label)
+        main_layout.addWidget(self.device_combo)
+
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
         self.log_text.setStyleSheet("background-color: black; color: lime;")
@@ -90,6 +104,19 @@ class PySpotlightApp(QMainWindow):
         button_layout.addWidget(exit_button)
 
         main_layout.addLayout(button_layout)
+
+    def refresh_devices_combo(self):
+        self.device_combo.clear()
+        devices = self.device_monitor.get_monitored_devices()
+        if not devices:
+            self.device_combo.addItem("Nenhum dispositivo monitorado")
+            self.device_combo.setEnabled(False)
+            return
+
+        self.device_combo.setEnabled(True)
+        for dev in devices:
+            label = dev.display_name()
+            self.device_combo.addItem(label, userData=dev)
 
     def create_overlay(self):
         screen_index = self.ctx.selected_screen
@@ -133,7 +160,7 @@ class PySpotlightApp(QMainWindow):
         idx = self.screen_combo.currentIndex()
         self.ctx.selected_screen = idx
         self.create_overlay()
-        self.append_log(f"🖥️ Tela selecionada: {idx}")
+        self.append_log(f"> Tela selecionada: {idx}")
 
     def hide_to_tray(self):
         self.hide()

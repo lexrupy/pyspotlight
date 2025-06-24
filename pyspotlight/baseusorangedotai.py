@@ -13,14 +13,21 @@ from .pointerdevice import BasePointerDevice
 class BaseusOrangeDotAI(BasePointerDevice):
     VENDOR_ID = 0xABC8
     PRODUCT_ID = 0xCA08
+    PRODUCT_DESCRIPTION = "Baseus Orange Dot AI Wireless Presenter"
 
     def __init__(self, app_ctx, hidraw_path):
         super().__init__(app_ctx=app_ctx, hidraw_path=hidraw_path)
         self.last_click_time_113 = 0
         self.double_click_interval = 0.3  # segundos para considerar duplo clique
         self._event_thread = None
-
         self.start_event_blocking()
+        self.add_known_path(hidraw_path)
+        for device in self.find_all_event_devices_for_known():
+            self.add_known_path(device.path)
+
+    # def initialize(self, app_ctx=None, hidraw_path=None):
+    #     # chamadas subsequentes ao singleton passam por aqui
+    #     self.add_known_path(hidraw_path)
 
     def start_event_blocking(self):
         if not self._event_thread or not self._event_thread.is_alive():
@@ -34,7 +41,7 @@ class BaseusOrangeDotAI(BasePointerDevice):
                 self._event_thread.start()
             else:
                 self.ctx.log(
-                    "⚠️ Nenhum dispositivo de entrada conhecido encontrado para bloquear."
+                    "* Nenhum dispositivo de entrada conhecido encontrado para bloquear."
                 )
 
     def find_all_event_devices_for_known(self):
@@ -43,9 +50,9 @@ class BaseusOrangeDotAI(BasePointerDevice):
             if self.__class__.is_known_device(path):
                 try:
                     devices.append(evdev.InputDevice(path))
-                    self.ctx.log(f"🟢 Encontrado device de entrada: {path}")
+                    self.ctx.log(f"* Encontrado device de entrada: {path}")
                 except Exception as e:
-                    self.ctx.log(f"⚠️ Erro ao acessar {path}: {e}")
+                    self.ctx.log(f"* Erro ao acessar {path}: {e}")
         return devices
 
     @classmethod
@@ -69,18 +76,18 @@ class BaseusOrangeDotAI(BasePointerDevice):
                     self.processa_pacote_hid(pacote)
         except PermissionError:
             print(
-                f"🚫 Sem permissão para acessar {self.path} (tente ajustar udev ou rodar com sudo)"
+                f"* Sem permissão para acessar {self.path} (tente ajustar udev ou rodar com sudo)"
             )
         except KeyboardInterrupt:
             print(f"\nFinalizando monitoramento de {self.path}")
         except OSError as e:
             if e.errno == 5:  # Input/output error
-                print("Dispositivo desconectado ou erro de I/O")
+                print("- Dispositivo desconectado ou erro de I/O")
             else:
-                print(f"⚠️ Erro em {self.path}: {e}")
+                print(f"* Erro em {self.path}: {e}")
 
         except Exception as e:
-            print(f"⚠️ Erro em {self.path}: {e}")
+            print(f"*  Erro em {self.path}: {e}")
 
     def read_pacotes_completos(self, f):
         buffer = bytearray()
@@ -185,39 +192,12 @@ class BaseusOrangeDotAI(BasePointerDevice):
             try:
                 dev.grab()
                 fd_para_dev[dev.fd] = dev
-                self.ctx.log(f"🟢 Monitorado: {dev.path}")
+                self.ctx.log(f"* Monitorado: {dev.path}")
             except Exception as e:
                 self.ctx.log(
-                    f"❌ Erro ao monitorar dispositivo {dev.path}: {e}. Tente executar como root ou ajuste as regras udev."
+                    f"* Erro ao monitorar dispositivo {dev.path}: {e}. Tente executar como root ou ajuste as regras udev."
                 )
-        self.ctx.log("🟢 Monitorando dispositivos...")
-
-        if hasattr(self.ctx, "ui") and self.ctx.ui:
-            try:
-                self.ctx.log("ℹ️ Interface uinput anterior substituída.")
-                self.ctx.ui.close()  # Fecha explicitamente, mesmo não sendo obrigatório
-            except Exception as e:
-                self.ctx.log(f"⚠️ Erro ao fechar uinput anterior: {e}")
-
-        self.ctx.ui = uinput.Device(
-            [
-                uinput.REL_X,
-                uinput.REL_Y,
-                uinput.BTN_LEFT,
-                uinput.BTN_RIGHT,
-                uinput.KEY_B,
-                uinput.KEY_PAGEUP,
-                uinput.KEY_PAGEDOWN,
-                uinput.KEY_ESC,
-                # uinput.KEY_LEFTCTRL,
-                uinput.KEY_F5,
-                uinput.KEY_SPACE,
-                uinput.KEY_LEFTSHIFT,
-                uinput.KEY_VOLUMEUP,
-                uinput.KEY_VOLUMEDOWN,
-            ],
-            name="Virtual Spotlight Mouse",
-        )
+        self.ctx.log("* Monitorando dispositivos...")
 
         try:
             while True:
@@ -241,7 +221,7 @@ class BaseusOrangeDotAI(BasePointerDevice):
 
                     except OSError as e:
                         if e.errno == 19:  # No such device
-                            self.ctx.log(f"⚠️ Dispositivo desconectado: {dev.path}")
+                            self.ctx.log(f"- Dispositivo desconectado: {dev.path}")
                             # Remove dispositivo da lista para não monitorar mais
                             fd_para_dev.pop(fd, None)
                             try:
@@ -251,14 +231,14 @@ class BaseusOrangeDotAI(BasePointerDevice):
                             # Opcional: se não há mais dispositivos, pode encerrar ou esperar
                             if not fd_para_dev:
                                 self.ctx.log(
-                                    "Nenhum dispositivo restante para monitorar. Encerrando thread."
+                                    "* Nenhum dispositivo restante para monitorar. Encerrando thread."
                                 )
                                 return
                         else:
                             raise
 
         except KeyboardInterrupt:
-            self.ctx.log("\n⏹️ Encerrando monitoramento.")
+            self.ctx.log("\n* Encerrando monitoramento.")
         finally:
             for dev in devices:
                 try:
