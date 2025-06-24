@@ -12,7 +12,7 @@ from PyQt5.QtWidgets import (
     QComboBox,
 )
 from PyQt5.QtGui import QGuiApplication
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
 from screeninfo import get_monitors
 from PIL import Image, ImageDraw
 from pystray import Icon, Menu, MenuItem
@@ -23,6 +23,8 @@ from pyspotlight.utils import capture_monitor_screenshot
 
 
 class PySpotlightApp(QMainWindow):
+    log_signal = pyqtSignal(str)
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Py-Spotlight")
@@ -30,10 +32,11 @@ class PySpotlightApp(QMainWindow):
 
         self.running = True
         self.icon = None
+        self.log_signal.connect(self.append_log)
 
         self.ctx = AppContext(
             selected_screen=0,
-            log_function=self.append_log,
+            log_function=self.thread_safe_log,
         )
         self.create_overlay()
         # self.spotlight_window = SpotlightOverlayWindow(self.ctx)
@@ -41,7 +44,7 @@ class PySpotlightApp(QMainWindow):
 
         self.init_ui()
         self.refresh_screens()
-        self.start_device_monitor()
+        self.device_monitor.start_monitoring()
 
     def init_ui(self):
         central_widget = QWidget()
@@ -111,6 +114,9 @@ class PySpotlightApp(QMainWindow):
     def append_log(self, message):
         self.log_text.append(message)
 
+    def thread_safe_log(self, message):
+        self.log_signal.emit(message)
+
     def refresh_screens(self):
         current_index = self.screen_combo.currentIndex()
         self.screens = get_monitors()
@@ -128,28 +134,6 @@ class PySpotlightApp(QMainWindow):
         self.ctx.selected_screen = idx
         self.create_overlay()
         self.append_log(f"🖥️ Tela selecionada: {idx}")
-
-    def start_device_monitor(self):
-        self.device_monitor.monitor_usb_hotplug()
-        # Lança monitoramento dos dispositivos já conectados
-        hidraws = self.device_monitor.find_known_hidraws()
-        if hidraws:
-            for path, dev_info in hidraws:
-                cls = dev_info["CLASS"]
-                dev = cls(path, app_ctx=self.ctx)
-                threading.Thread(target=dev.monitor, daemon=True).start()
-            self.append_log("🟢 Dispositivos compatíveis encontrados e monitorados.")
-        else:
-            self.append_log("⚠️ Nenhum dispositivo compatível encontrado.")
-
-        dispositivos = self.device_monitor.find_all_event_devices_for_known()
-        if dispositivos:
-            t = threading.Thread(
-                target=self.device_monitor.prevent_key_and_mouse_events,
-                args=(dispositivos,),
-                daemon=True,
-            )
-            t.start()
 
     def hide_to_tray(self):
         self.hide()

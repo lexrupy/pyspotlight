@@ -6,6 +6,9 @@ from .pointerdevice import BasePointerDevice
 
 
 class BaseusOrangeDotAI(BasePointerDevice):
+    VENDOR_ID = 0xABC8
+    PRODUCT_ID = 0xCA08
+
     def read_pacotes_completos(self, f):
         buffer = bytearray()
         while True:

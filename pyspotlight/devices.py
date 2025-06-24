@@ -10,11 +10,15 @@ import threading
 
 from .baseusorangedotai import BaseusOrangeDotAI
 
-# Lista de dispositivos conhecidos
-DEVICE_IDS = [
-    {"VENDOR_ID": 0xABC8, "PRODUCT_ID": 0xCA08, "CLASS": BaseusOrangeDotAI},
-    # Adicione outros pares vendor/product aqui
-]
+# # Lista de dispositivos conhecidos
+# DEVICE_IDS = [
+#     {"VENDOR_ID": 0xABC8, "PRODUCT_ID": 0xCA08, "CLASS": BaseusOrangeDotAI},
+#     # Adicione outros pares vendor/product aqui
+# ]
+
+DEVICE_CLASSES = {
+    BaseusOrangeDotAI,
+}
 
 
 class DeviceMonitor:
@@ -44,8 +48,7 @@ class DeviceMonitor:
         # Encontra e inicia monitoramento de dispositivos já conectados
         hidraws = self.find_known_hidraws()
         if hidraws:
-            for path, dev_info in hidraws:
-                cls = dev_info["CLASS"]
+            for path, cls in hidraws:
                 dev = cls(path, app_ctx=self._ctx)
                 threading.Thread(target=dev.monitor, daemon=True).start()
         else:
@@ -65,16 +68,37 @@ class DeviceMonitor:
                 f"❌ Erro inesperado no loop principal: {e}"
             )  # self._ctx.log("Encerrando monitoramento de dispositivos HID.")
 
+    def start_monitoring(self):
+        self.monitor_usb_hotplug()
+        # Lança monitoramento dos dispositivos já conectados
+        hidraws = self.find_known_hidraws()
+        if hidraws:
+            for path, cls in hidraws:
+                dev = cls(path, app_ctx=self._ctx)
+                threading.Thread(target=dev.monitor, daemon=True).start()
+            self._ctx.log("🟢 Dispositivos compatíveis encontrados e monitorados.")
+        else:
+            self._ctx.log("⚠️ Nenhum dispositivo compatível encontrado.")
+
+        dispositivos = self.find_all_event_devices_for_known()
+        if dispositivos:
+            t = threading.Thread(
+                target=self.prevent_key_and_mouse_events,
+                args=(dispositivos,),
+                daemon=True,
+            )
+            t.start()
+
     def is_known_device(self, hidraw_path):
         try:
             output = subprocess.check_output(
                 ["udevadm", "info", "-a", "-n", hidraw_path], text=True
             ).lower()
-            for dev in DEVICE_IDS:
-                vid = f"{dev['VENDOR_ID']:04x}"
-                pid = f"{dev['PRODUCT_ID']:04x}"
+            for cls in DEVICE_CLASSES:
+                vid = f"{cls.VENDOR_ID:04x}"
+                pid = f"{cls.PRODUCT_ID:04x}"
                 if vid in output and pid in output:
-                    return True, dev
+                    return True, cls
             return False, None
         except subprocess.CalledProcessError:
             return False, None
@@ -82,9 +106,9 @@ class DeviceMonitor:
     def find_known_hidraws(self):
         devices = []
         for path in glob.glob("/dev/hidraw*"):
-            ok, dev_info = self.is_known_device(path)
+            ok, dev_cls = self.is_known_device(path)
             if ok:
-                devices.append((path, dev_info))
+                devices.append((path, dev_cls))
         return devices
 
     def find_evdev_path_from_hidraw(self, hidraw_path):
@@ -110,9 +134,9 @@ class DeviceMonitor:
             output = subprocess.check_output(
                 ["udevadm", "info", "-a", "-n", path], text=True
             ).lower()
-            for dev in DEVICE_IDS:
-                vid = f"{dev['VENDOR_ID']:04x}"
-                pid = f"{dev['PRODUCT_ID']:04x}"
+            for cls in DEVICE_CLASSES:
+                vid = f"{cls.VENDOR_ID:04x}"
+                pid = f"{cls.PRODUCT_ID:04x}"
                 if vid in output and pid in output:
                     return True
         except Exception as e:
@@ -140,12 +164,11 @@ class DeviceMonitor:
             if path.startswith("/dev/hidraw"):
                 if path in self._monitored_devices:
                     return  # já monitorado
-                ok, dev_info = self.is_known_device(path)
-                if ok and dev_info:
+                ok, cls = self.is_known_device(path)
+                if ok and cls:
                     self._ctx.log(
                         f"➕ Novo dispositivo HID compatível conectado: {path}"
                     )
-                    cls = dev_info["CLASS"]
                     dev = cls(path, app_ctx=self._ctx)
                     t = threading.Thread(target=dev.monitor, daemon=True)
                     t.start()
