@@ -25,10 +25,6 @@ class BaseusOrangeDotAI(BasePointerDevice):
         for device in self.find_all_event_devices_for_known():
             self.add_known_path(device.path)
 
-    # def initialize(self, app_ctx=None, hidraw_path=None):
-    #     # chamadas subsequentes ao singleton passam por aqui
-    #     self.add_known_path(hidraw_path)
-
     def start_event_blocking(self):
         if not self._event_thread or not self._event_thread.is_alive():
             devs = self.find_all_event_devices_for_known()
@@ -40,7 +36,7 @@ class BaseusOrangeDotAI(BasePointerDevice):
                 )
                 self._event_thread.start()
             else:
-                self.ctx.log(
+                self._ctx.log(
                     "* Nenhum dispositivo de entrada conhecido encontrado para bloquear."
                 )
 
@@ -50,9 +46,9 @@ class BaseusOrangeDotAI(BasePointerDevice):
             if self.__class__.is_known_device(path):
                 try:
                     devices.append(evdev.InputDevice(path))
-                    self.ctx.log(f"* Encontrado device de entrada: {path}")
+                    self._ctx.log(f"* Encontrado device de entrada: {path}")
                 except Exception as e:
-                    self.ctx.log(f"* Erro ao acessar {path}: {e}")
+                    self._ctx.log(f"* Erro ao acessar {path}: {e}")
         return devices
 
     @classmethod
@@ -75,19 +71,19 @@ class BaseusOrangeDotAI(BasePointerDevice):
                 for pacote in self.read_pacotes_completos(f):
                     self.processa_pacote_hid(pacote)
         except PermissionError:
-            print(
+            self._ctx.log(
                 f"* Sem permissão para acessar {self.path} (tente ajustar udev ou rodar com sudo)"
             )
         except KeyboardInterrupt:
-            print(f"\nFinalizando monitoramento de {self.path}")
+            self._ctx.log(f"\nFinalizando monitoramento de {self.path}")
         except OSError as e:
             if e.errno == 5:  # Input/output error
-                print("- Dispositivo desconectado ou erro de I/O")
+                self._ctx.log("- Dispositivo desconectado ou erro de I/O")
             else:
-                print(f"* Erro em {self.path}: {e}")
+                self._ctx.log(f"* Erro em {self.path}: {e}")
 
         except Exception as e:
-            print(f"*  Erro em {self.path}: {e}")
+            self._ctx.log(f"*  Erro em {self.path}: {e}")
 
     def read_pacotes_completos(self, f):
         buffer = bytearray()
@@ -113,21 +109,21 @@ class BaseusOrangeDotAI(BasePointerDevice):
         if status_byte == 0:
             return
 
-        ow = self.ctx.overlay_window
-        current_mode = self.ctx.overlay_window.current_mode()
+        ow = self._ctx.overlay_window
+        current_mode = self._ctx.overlay_window.current_mode()
 
         match status_byte:
             case 97:
                 if current_mode == MOUSE_MODE:
-                    self.emit_key_press(self.ctx.ui, uinput.BTN_LEFT)
+                    self.emit_key_press(self._ctx.ui, uinput.BTN_LEFT)
                 else:
                     ow.set_mouse_mode()
             case 99:
                 if current_mode == MOUSE_MODE:
-                    ow.switch_mode()
+                    ow.switch_mode(step=0)
             case 103:
                 if current_mode == MOUSE_MODE:
-                    self.emit_key_press(self.ctx.ui, uinput.KEY_B)
+                    self.emit_key_press(self._ctx.ui, uinput.KEY_B)
                 else:
                     ow.clear_drawing()
             case 104 | 114:
@@ -136,19 +132,19 @@ class BaseusOrangeDotAI(BasePointerDevice):
                 ow.handle_draw_command("stop_move")
             case 106:
                 if current_mode == MOUSE_MODE:
-                    self.emit_key_press(self.ctx.ui, uinput.KEY_PAGEUP)
+                    self.emit_key_press(self._ctx.ui, uinput.KEY_PAGEUP)
                 elif current_mode == PEN_MODE:
                     ow.change_line_width(+1)
                 elif current_mode == SPOTLIGHT_MODE:
                     ow.change_spot_radius(+1)
             case 107:
                 if current_mode == MOUSE_MODE:
-                    self.emit_key_press(self.ctx.ui, uinput.KEY_ESC)
+                    self.emit_key_press(self._ctx.ui, uinput.KEY_ESC)
                 else:
                     ow.set_mouse_mode()
             case 108:
                 if current_mode == MOUSE_MODE:
-                    self.emit_key_press(self.ctx.ui, uinput.KEY_PAGEDOWN)
+                    self.emit_key_press(self._ctx.ui, uinput.KEY_PAGEDOWN)
                 elif current_mode == PEN_MODE:
                     ow.change_line_width(-1)
                 elif current_mode == SPOTLIGHT_MODE:
@@ -156,12 +152,12 @@ class BaseusOrangeDotAI(BasePointerDevice):
             case 109:
                 if current_mode == MOUSE_MODE:
                     self.emit_key_chord(
-                        self.ctx.ui, [uinput.KEY_LEFTSHIFT, uinput.KEY_F5]
+                        self._ctx.ui, [uinput.KEY_LEFTSHIFT, uinput.KEY_F5]
                     )
             case 113:
                 now = time.time()
                 if now - self.last_click_time_113 < self.double_click_interval:
-                    ow.switch_mode()
+                    ow.switch_mode(step=0)
                 self.last_click_time_113 = now
             case 116 | 117:
                 if current_mode in [PEN_MODE, LASER_MODE]:
@@ -171,12 +167,12 @@ class BaseusOrangeDotAI(BasePointerDevice):
                     ow.adjust_overlay_color(0, 10)
             case 120:
                 if current_mode == MOUSE_MODE:
-                    self.emit_key_press(self.ctx.ui, uinput.KEY_VOLUMEUP)
+                    self.emit_key_press(self._ctx.ui, uinput.KEY_VOLUMEUP)
                 elif current_mode == SPOTLIGHT_MODE:
                     ow.zoom(+1)
             case 121:
                 if current_mode == MOUSE_MODE:
-                    self.emit_key_press(self.ctx.ui, uinput.KEY_VOLUMEDOWN)
+                    self.emit_key_press(self._ctx.ui, uinput.KEY_VOLUMEDOWN)
                 else:
                     ow.zoom(-1)
             case 122 | 123:
@@ -192,12 +188,12 @@ class BaseusOrangeDotAI(BasePointerDevice):
             try:
                 dev.grab()
                 fd_para_dev[dev.fd] = dev
-                self.ctx.log(f"* Monitorado: {dev.path}")
+                self._ctx.log(f"* Monitorado: {dev.path}")
             except Exception as e:
-                self.ctx.log(
+                self._ctx.log(
                     f"* Erro ao monitorar dispositivo {dev.path}: {e}. Tente executar como root ou ajuste as regras udev."
                 )
-        self.ctx.log("* Monitorando dispositivos...")
+        self._ctx.log("* Monitorando dispositivos...")
 
         try:
             while True:
@@ -217,11 +213,11 @@ class BaseusOrangeDotAI(BasePointerDevice):
                                 )
                             ):
                                 # Repassa evento virtual
-                                self.ctx.ui.emit((event.type, event.code), event.value)
+                                self._ctx.ui.emit((event.type, event.code), event.value)
 
                     except OSError as e:
                         if e.errno == 19:  # No such device
-                            self.ctx.log(f"- Dispositivo desconectado: {dev.path}")
+                            self._ctx.log(f"- Dispositivo desconectado: {dev.path}")
                             # Remove dispositivo da lista para não monitorar mais
                             fd_para_dev.pop(fd, None)
                             try:
@@ -230,7 +226,7 @@ class BaseusOrangeDotAI(BasePointerDevice):
                                 pass
                             # Opcional: se não há mais dispositivos, pode encerrar ou esperar
                             if not fd_para_dev:
-                                self.ctx.log(
+                                self._ctx.log(
                                     "* Nenhum dispositivo restante para monitorar. Encerrando thread."
                                 )
                                 return
@@ -238,7 +234,7 @@ class BaseusOrangeDotAI(BasePointerDevice):
                             raise
 
         except KeyboardInterrupt:
-            self.ctx.log("\n* Encerrando monitoramento.")
+            self._ctx.log("\n* Encerrando monitoramento.")
         finally:
             for dev in devices:
                 try:

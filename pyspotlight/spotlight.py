@@ -165,6 +165,11 @@ class SpotlightOverlayWindow(QWidget):
         self.overlay_color = QColor(r, g, b, a)
         self.update()
 
+    def set_spotlight_mode(self):
+        self.mode = SPOTLIGHT_MODE
+        self.capture_screenshot()
+        self.update()
+
     def set_mouse_mode(self):
         self.mode = MOUSE_MODE
         self.hide()

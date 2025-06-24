@@ -3,12 +3,13 @@ import pyudev
 import glob
 import threading
 
-
-from .baseusorangedotai import BaseusOrangeDotAI
+from pyspotlight.genericvrbox import GenericVRBoxPointer
+from pyspotlight.baseusorangedotai import BaseusOrangeDotAI
 
 
 DEVICE_CLASSES = {
     BaseusOrangeDotAI,
+    GenericVRBoxPointer,
 }
 
 
