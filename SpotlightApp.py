@@ -19,6 +19,7 @@ from pystray import Icon, Menu, MenuItem
 from pyspotlight.appcontext import AppContext
 from pyspotlight.devices import DeviceMonitor
 from pyspotlight.spotlight import SpotlightOverlayWindow
+from pyspotlight.infoverlay import InfOverlayWindow
 from pyspotlight.utils import capture_monitor_screenshot
 
 
@@ -42,6 +43,10 @@ class PySpotlightApp(QMainWindow):
         self.create_overlay()
         # self.spotlight_window = SpotlightOverlayWindow(self.ctx)
         self.device_monitor = DeviceMonitor(self.ctx)
+
+        self.info_overlay = None
+        if len(QGuiApplication.screens()) >= 1:
+            self.setup_info_overlay()
 
         self.init_ui()
         self.refresh_screens()
@@ -134,6 +139,19 @@ class PySpotlightApp(QMainWindow):
             monitor_index=screen_index,
         )
         # self.ctx.overlay_window.showFullScreen()
+
+    def setup_info_overlay(self):
+        # Pega o monitor que não está sendo usado pelo spotlight
+        all_screens = QGuiApplication.screens()
+        target_index = 0
+        if len(all_screens) > 1:
+            target_index = 1 if self.ctx.selected_screen == 0 else 0
+        geometry = all_screens[target_index].geometry()
+        self.info_overlay = InfOverlayWindow(geometry)
+
+    def mostrar_info_em_monitor_secundario(self, mensagem):
+        if self.info_overlay:
+            self.info_overlay.safe_show_message(mensagem)
 
     def clear_log(self):
         self.log_text.clear()
