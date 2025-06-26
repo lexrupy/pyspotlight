@@ -4,15 +4,15 @@ import uinput
 class AppContext:
     def __init__(
         self,
-        spx_proc=None,
         selected_screen=0,
         log_function=None,
         overlay_window=None,
+        show_info_function=None,
     ):
-        self._spx_proc = spx_proc
         self._selected_screen = selected_screen
         self._log_function = log_function
         self._overlay_window = overlay_window
+        self._show_info_function = show_info_function
 
         self._ui = uinput.Device(
             [
@@ -77,3 +77,15 @@ class AppContext:
     def log(self, message):
         if self._log_function:
             self._log_function(message)
+
+    @property
+    def show_info_function(self):
+        return self._show_info_function
+
+    @show_info_function.setter
+    def show_info_function(self, func):
+        self._show_info_function = func
+
+    def show_info(self, message):
+        if self._show_info_function:
+            self._show_info_function(message)
