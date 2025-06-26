@@ -6,7 +6,7 @@ import evdev
 import threading
 import select
 
-from pyspotlight.utils import LASER_MODE, MOUSE_MODE, PEN_MODE, SPOTLIGHT_MODE
+from pyspotlight.utils import MODE_LASER, MODE_MOUSE, MODE_PEN, MODE_SPOTLIGHT
 from .pointerdevice import BasePointerDevice
 
 
@@ -122,7 +122,7 @@ class GenericVRBoxPointer(BasePointerDevice):
                 long_press = tempo_ativo >= self.LONG_PRESS_MS / 1000
 
                 # Se estava desenhando com G1 ou G2, parar
-                if current_mode == PEN_MODE and self.botao_ativo in ("G1", "G2"):
+                if current_mode == MODE_PEN and self.botao_ativo in ("G1", "G2"):
                     ow.handle_draw_command("stop_move")
 
                 self.executa_acao(self.botao_ativo, long_press_state=long_press)
@@ -149,7 +149,7 @@ class GenericVRBoxPointer(BasePointerDevice):
             self.botao_press_start = agora
             self.last_press_time = agora  # atualiza para o próximo ciclo
 
-            if current_mode == PEN_MODE and nome in ("G1", "G2"):
+            if current_mode == MODE_PEN and nome in ("G1", "G2"):
                 ow.handle_draw_command("start_move")
 
             # Ativa repetição apenas se for um segundo clique rápido (duplo clique)
@@ -173,17 +173,17 @@ class GenericVRBoxPointer(BasePointerDevice):
         current_mode = self._ctx.overlay_window.current_mode()
         # Exemplo para botão A
         if botao == "C":
-            if long_press_state and current_mode == MOUSE_MODE:
+            if long_press_state and current_mode == MODE_MOUSE:
                 ow.switch_mode(step=-1)
             else:
                 ow.switch_mode()
 
         elif botao == "B":
-            if long_press_state and current_mode != MOUSE_MODE:
+            if long_press_state and current_mode != MODE_MOUSE:
                 ow.set_mouse_mode()
-            if current_mode == MOUSE_MODE:
+            if current_mode == MODE_MOUSE:
                 self.emit_key_press(self._ctx.ui, uinput.KEY_B)
-            elif current_mode == PEN_MODE:
+            elif current_mode == MODE_PEN:
                 ow.clear_drawing()
 
         elif botao == "A":
@@ -194,25 +194,25 @@ class GenericVRBoxPointer(BasePointerDevice):
             if long_press_state:
                 ow.set_mouse_mode()
             else:
-                if current_mode in [PEN_MODE, LASER_MODE]:
+                if current_mode in [MODE_PEN, MODE_LASER]:
                     ow.next_color()
 
         elif botao == "G1":
-            if current_mode == MOUSE_MODE and long_press_state:
+            if current_mode == MODE_MOUSE and long_press_state:
                 self.emit_key_chord(self._ctx.ui, [uinput.KEY_LEFTSHIFT, uinput.KEY_F5])
-            if current_mode == MOUSE_MODE:
+            if current_mode == MODE_MOUSE:
                 self.emit_key_press(self._ctx.ui, uinput.KEY_PAGEDOWN)
-            elif current_mode == PEN_MODE:
+            elif current_mode == MODE_PEN:
                 ow.change_line_width(+1)
-            elif current_mode == SPOTLIGHT_MODE:
+            elif current_mode == MODE_SPOTLIGHT:
                 ow.change_spot_radius(+1)
 
         elif botao == "G2":
-            if current_mode == MOUSE_MODE:
+            if current_mode == MODE_MOUSE:
                 self.emit_key_press(self._ctx.ui, uinput.KEY_PAGEUP)
-            elif current_mode == PEN_MODE:
+            elif current_mode == MODE_PEN:
                 ow.change_line_width(-1)
-            elif current_mode == SPOTLIGHT_MODE:
+            elif current_mode == MODE_SPOTLIGHT:
                 ow.change_spot_radius(-1)
 
         # match status_byte:

@@ -6,7 +6,7 @@ from PyQt5.QtCore import Qt, QTimer, QMetaObject
 
 from PyQt5.QtWidgets import QWidget, QLabel
 from PyQt5.QtGui import QFont, QColor, QPainter, QFontMetrics
-from PyQt5.QtCore import Qt, QTimer, QRect, QPoint
+from PyQt5.QtCore import Qt, QTimer, QRect, QPoint, pyqtSignal, QObject
 
 
 class InfOverlayWindow(QWidget):
@@ -28,13 +28,6 @@ class InfOverlayWindow(QWidget):
         self.label.setStyleSheet("color: white;")
         self.font = QFont("Arial", 64, QFont.Bold)
         self.label.setFont(self.font)
-
-    def safe_show_message(self, text, duration_ms=2000):
-        QMetaObject.invokeMethod(
-            self,
-            lambda: self.show_message(text, duration_ms=duration_ms),
-            Qt.QueuedConnection,
-        )
 
     def show_message(self, text, duration_ms=2000):
         self.label.setText(text)
@@ -71,3 +64,15 @@ class InfOverlayWindow(QWidget):
         painter.setBrush(QColor(0, 0, 0, 180))  # preto translúcido
         painter.setPen(Qt.NoPen)
         painter.drawRoundedRect(self.rect(), 20, 20)
+
+
+class InfOverlayController(QObject):
+    show_requested = pyqtSignal(str, int)
+
+    def __init__(self, overlay: InfOverlayWindow):
+        super().__init__()
+        self.overlay = overlay
+        self.show_requested.connect(self.overlay.show_message)
+
+    def show_message(self, text, duration=2000):
+        self.show_requested.emit(text, duration)

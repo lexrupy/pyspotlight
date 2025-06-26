@@ -20,8 +20,12 @@ from pyspotlight.appcontext import AppContext
 from pyspotlight.devices import DeviceMonitor
 from pyspotlight.spotlight import SpotlightOverlayWindow
 from pyspotlight.settingswindow import SpotlightSettingsWindow
-from pyspotlight.infoverlay import InfOverlayWindow
+from pyspotlight.infoverlay import InfOverlayWindow, InfOverlayController
 from pyspotlight.utils import capture_monitor_screenshot
+
+import faulthandler
+
+faulthandler.enable()
 
 
 class PySpotlightApp(QMainWindow):
@@ -40,12 +44,14 @@ class PySpotlightApp(QMainWindow):
         self.ctx = AppContext(
             selected_screen=0,
             log_function=self.thread_safe_log,
+            show_info_function=self.mostrar_info_em_monitor_secundario,
         )
         self.create_overlay()
         # self.spotlight_window = SpotlightOverlayWindow(self.ctx)
         self.device_monitor = DeviceMonitor(self.ctx)
 
         self.info_overlay = None
+        self.info_controller = None
         if len(QGuiApplication.screens()) >= 1:
             self.setup_info_overlay()
 
@@ -153,10 +159,11 @@ class PySpotlightApp(QMainWindow):
             target_index = 1 if self.ctx.selected_screen == 0 else 0
         geometry = all_screens[target_index].geometry()
         self.info_overlay = InfOverlayWindow(geometry)
+        self.info_controller = InfOverlayController(self.info_overlay)
 
     def mostrar_info_em_monitor_secundario(self, mensagem):
-        if self.info_overlay:
-            self.info_overlay.safe_show_message(mensagem)
+        if self.info_controller:
+            self.info_controller.show_message(mensagem)
 
     def clear_log(self):
         self.log_text.clear()

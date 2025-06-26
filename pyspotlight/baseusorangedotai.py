@@ -6,7 +6,7 @@ import evdev
 import threading
 import select
 
-from pyspotlight.utils import LASER_MODE, MOUSE_MODE, PEN_MODE, SPOTLIGHT_MODE
+from pyspotlight.utils import MODE_LASER, MODE_MOUSE, MODE_PEN, MODE_SPOTLIGHT
 from .pointerdevice import BasePointerDevice
 
 
@@ -86,15 +86,22 @@ class BaseusOrangeDotAI(BasePointerDevice):
             self._ctx.log(f"*  Erro em {self.path}: {e}")
 
     def read_pacotes_completos(self, f):
-        buffer = bytearray()
-        while True:
-            b = f.read(1)
-            if not b:
-                break
-            buffer += b
-            if b[0] == 182:
-                yield bytes(buffer)
-                buffer.clear()
+        try:
+            buffer = bytearray()
+            while True:
+                b = f.read(1)
+                if not b:
+                    break
+                buffer += b
+                if b[0] == 182:
+                    yield bytes(buffer)
+                    buffer.clear()
+        except OSError as e:
+            print(f"[ERRO] Falha ao ler do device: {e}")
+            self._ctx.log(f"[ERRO] Falha ao ler do device: {e}")
+        except Exception as e:
+            print(f"[ERRO] Exceção inesperada: {e}")
+            self._ctx.log(f"[ERRO] Exceção inesperada: {e}")
 
     def processa_pacote_hid(self, data):
         if not (
@@ -114,15 +121,15 @@ class BaseusOrangeDotAI(BasePointerDevice):
 
         match status_byte:
             case 97:
-                if current_mode == MOUSE_MODE:
+                if current_mode == MODE_MOUSE:
                     self.emit_key_press(self._ctx.ui, uinput.BTN_LEFT)
                 else:
-                    ow.set_mouse_mode()
+                    ow.switch_mode(direct_mode=MODE_MOUSE)
             case 99:
-                if current_mode == MOUSE_MODE:
-                    ow.switch_mode(step=0)
+                if current_mode == MODE_MOUSE:
+                    ow.switch_mode()
             case 103:
-                if current_mode == MOUSE_MODE:
+                if current_mode == MODE_MOUSE:
                     self.emit_key_press(self._ctx.ui, uinput.KEY_B)
                 else:
                     ow.clear_drawing()
@@ -131,56 +138,119 @@ class BaseusOrangeDotAI(BasePointerDevice):
             case 105 | 115:
                 ow.handle_draw_command("stop_move")
             case 106:
-                if current_mode == MOUSE_MODE:
+                if current_mode == MODE_MOUSE:
                     self.emit_key_press(self._ctx.ui, uinput.KEY_PAGEUP)
-                elif current_mode == PEN_MODE:
-                    ow.change_line_width(+1)
-                elif current_mode == SPOTLIGHT_MODE:
-                    ow.change_spot_radius(+1)
+                elif current_mode == MODE_PEN:
+                    ow.change_line_width(-1)
+                elif current_mode == MODE_SPOTLIGHT:
+                    ow.change_spot_radius(-1)
             case 107:
-                if current_mode == MOUSE_MODE:
+                if current_mode == MODE_MOUSE:
                     self.emit_key_press(self._ctx.ui, uinput.KEY_ESC)
                 else:
                     ow.set_mouse_mode()
             case 108:
-                if current_mode == MOUSE_MODE:
+                if current_mode == MODE_MOUSE:
                     self.emit_key_press(self._ctx.ui, uinput.KEY_PAGEDOWN)
-                elif current_mode == PEN_MODE:
-                    ow.change_line_width(-1)
-                elif current_mode == SPOTLIGHT_MODE:
-                    ow.change_spot_radius(-1)
+                elif current_mode == MODE_PEN:
+                    ow.change_line_width(+1)
+                elif current_mode == MODE_SPOTLIGHT:
+                    ow.change_spot_radius(+1)
             case 109:
-                if current_mode == MOUSE_MODE:
+                if current_mode == MODE_MOUSE:
                     self.emit_key_chord(
                         self._ctx.ui, [uinput.KEY_LEFTSHIFT, uinput.KEY_F5]
                     )
             case 113:
                 now = time.time()
                 if now - self.last_click_time_113 < self.double_click_interval:
-                    ow.switch_mode(step=0)
+                    if current_mode == MODE_MOUSE:
+                        ow.switch_mode(direct_mode=MODE_SPOTLIGHT)
+                    else:
+                        ow.switch_mode()
                 self.last_click_time_113 = now
             case 116 | 117:
-                if current_mode in [PEN_MODE, LASER_MODE]:
+                if current_mode in [MODE_PEN, MODE_LASER]:
                     ow.next_color()
             case 118:
-                if current_mode == SPOTLIGHT_MODE:
+                if current_mode == MODE_SPOTLIGHT:
                     ow.adjust_overlay_color(0, 10)
             case 120:
-                if current_mode == MOUSE_MODE:
+                if current_mode == MODE_MOUSE:
                     self.emit_key_press(self._ctx.ui, uinput.KEY_VOLUMEUP)
-                elif current_mode == SPOTLIGHT_MODE:
+                elif current_mode == MODE_SPOTLIGHT:
                     ow.zoom(+1)
             case 121:
-                if current_mode == MOUSE_MODE:
+                if current_mode == MODE_MOUSE:
                     self.emit_key_press(self._ctx.ui, uinput.KEY_VOLUMEDOWN)
                 else:
                     ow.zoom(-1)
             case 122 | 123:
-                if current_mode in [PEN_MODE, LASER_MODE]:
+                if current_mode in [MODE_PEN, MODE_LASER]:
                     ow.next_color(-1)
             case 124:
-                if current_mode == SPOTLIGHT_MODE:
+                if current_mode == MODE_SPOTLIGHT:
                     ow.adjust_overlay_color(0, -10)
+
+    # def prevent_key_and_mouse_events(self, devices):
+    #     fd_para_dev = {}
+    #     for dev in devices:
+    #         try:
+    #             dev.grab()
+    #             fd_para_dev[dev.fd] = dev
+    #             self._ctx.log(f"* Monitorado: {dev.path}")
+    #         except Exception as e:
+    #             self._ctx.log(
+    #                 f"* Erro ao monitorar dispositivo {dev.path}: {e}. Tente executar como root ou ajuste as regras udev."
+    #             )
+    #     self._ctx.log("* Monitorando dispositivos...")
+    #
+    #     try:
+    #         while True:
+    #             r, _, _ = select.select(fd_para_dev, [], [])
+    #             for fd in r:
+    #                 dev = fd_para_dev.get(fd)
+    #                 if dev is None:
+    #                     continue
+    #                 try:
+    #                     for event in dev.read():
+    #                         if event.type == evdev.ecodes.EV_REL or (
+    #                             event.type == evdev.ecodes.EV_KEY
+    #                             and event.code
+    #                             in (
+    #                                 evdev.ecodes.BTN_LEFT,
+    #                                 evdev.ecodes.BTN_RIGHT,
+    #                             )
+    #                         ):
+    #                             # Repassa evento virtual
+    #                             self._ctx.ui.emit((event.type, event.code), event.value)
+    #
+    #                 except OSError as e:
+    #                     if e.errno == 19:  # No such device
+    #                         self._ctx.log(f"- Dispositivo desconectado: {dev.path}")
+    #                         # Remove dispositivo da lista para não monitorar mais
+    #                         fd_para_dev.pop(fd, None)
+    #                         try:
+    #                             dev.ungrab()
+    #                         except Exception:
+    #                             pass
+    #                         # Opcional: se não há mais dispositivos, pode encerrar ou esperar
+    #                         if not fd_para_dev:
+    #                             self._ctx.log(
+    #                                 "* Nenhum dispositivo restante para monitorar. Encerrando thread."
+    #                             )
+    #                             return
+    #                     else:
+    #                         raise
+    #
+    #     except KeyboardInterrupt:
+    #         self._ctx.log("\n* Encerrando monitoramento.")
+    #     finally:
+    #         for dev in devices:
+    #             try:
+    #                 dev.ungrab()
+    #             except Exception:
+    #                 pass
 
     def prevent_key_and_mouse_events(self, devices):
         fd_para_dev = {}
@@ -193,11 +263,16 @@ class BaseusOrangeDotAI(BasePointerDevice):
                 self._ctx.log(
                     f"* Erro ao monitorar dispositivo {dev.path}: {e}. Tente executar como root ou ajuste as regras udev."
                 )
+
+        if not fd_para_dev:
+            self._ctx.log("* Nenhum dispositivo monitorado para bloquear eventos.")
+            return
+
         self._ctx.log("* Monitorando dispositivos...")
 
         try:
             while True:
-                r, _, _ = select.select(fd_para_dev, [], [])
+                r, _, _ = select.select(fd_para_dev.keys(), [], [])
                 for fd in r:
                     dev = fd_para_dev.get(fd)
                     if dev is None:
@@ -212,7 +287,7 @@ class BaseusOrangeDotAI(BasePointerDevice):
                                     evdev.ecodes.BTN_RIGHT,
                                 )
                             ):
-                                # Repassa evento virtual
+                                # Repassa evento virtual com cuidado
                                 self._ctx.ui.emit((event.type, event.code), event.value)
 
                     except OSError as e:
@@ -224,15 +299,17 @@ class BaseusOrangeDotAI(BasePointerDevice):
                                 dev.ungrab()
                             except Exception:
                                 pass
-                            # Opcional: se não há mais dispositivos, pode encerrar ou esperar
                             if not fd_para_dev:
                                 self._ctx.log(
                                     "* Nenhum dispositivo restante para monitorar. Encerrando thread."
                                 )
                                 return
                         else:
-                            raise
-
+                            self._ctx.log(f"* Erro de OSError na leitura: {e}")
+                            # Opcional: continue ou re-raise, cuidado com segfaults
+                    except Exception as e:
+                        self._ctx.log(f"* Exceção inesperada: {e}")
+                        # Não re-raise para evitar segfaults inesperados
         except KeyboardInterrupt:
             self._ctx.log("\n* Encerrando monitoramento.")
         finally:

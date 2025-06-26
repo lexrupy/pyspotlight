@@ -17,11 +17,12 @@ from PyQt5.QtGui import (
 from PyQt5.QtCore import Qt, QRect, QTimer, QPointF, QRectF
 
 from .utils import (
+    MODE_MAP,
     capture_monitor_screenshot,
-    SPOTLIGHT_MODE,
-    PEN_MODE,
-    LASER_MODE,
-    MOUSE_MODE,
+    MODE_SPOTLIGHT,
+    MODE_PEN,
+    MODE_LASER,
+    MODE_MOUSE,
 )
 
 
@@ -47,8 +48,8 @@ class SpotlightOverlayWindow(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setCursor(Qt.BlankCursor)
 
-        self.mode = SPOTLIGHT_MODE
-        self.last_mode = SPOTLIGHT_MODE
+        self.mode = MODE_MOUSE
+        self.last_mode = MODE_MOUSE
 
         self.last_key_time = 0
         self.last_key_pressed = 0
@@ -166,22 +167,33 @@ class SpotlightOverlayWindow(QWidget):
         self.update()
 
     def set_spotlight_mode(self):
-        self.mode = SPOTLIGHT_MODE
+        self.mode = MODE_SPOTLIGHT
         self.capture_screenshot()
         self.update()
 
     def set_mouse_mode(self):
-        self.mode = MOUSE_MODE
+        self.mode = MODE_MOUSE
         self.hide()
 
-    def switch_mode(self, step=1):
-        next_mode = self.mode + step
-        self.mode = next_mode % 4
-        if self.mode == MOUSE_MODE:
+    def switch_mode(self, step=1, direct_mode=-1):
+        if direct_mode >= 0:
+            self.mode = direct_mode
+            # self.is_in_auto = direct_mode == MODE_AUTO
+        else:
+            self.mode = (self.mode + step) % 4
+            # self.is_in_auto = False
+
+        if self.mode == MODE_MOUSE:
             self.hide()
         else:
             self.capture_screenshot()
             self.update()
+
+        if self.mode in [MODE_SPOTLIGHT, MODE_LASER, MODE_PEN]:
+            self.last_mode = self.mode
+
+        self.ctx.log(f"Modo atual: {MODE_MAP[self.mode]}")
+        self.ctx.show_info(MODE_MAP[self.mode])
 
     def change_spot_radius(self, increase=1):
         if increase == 0:
@@ -192,7 +204,7 @@ class SpotlightOverlayWindow(QWidget):
         self.update()
 
     def zoom(self, direction):
-        if self.mode == SPOTLIGHT_MODE:
+        if self.mode == MODE_SPOTLIGHT:
             if direction > 0:
                 self.zoom_factor = min(self.zoom_max, self.zoom_factor + 1.0)
             else:
@@ -350,11 +362,11 @@ class SpotlightOverlayWindow(QWidget):
         cursor_pos = self.mapFromGlobal(QCursor.pos())
         # Fundo: sempre desenha o screenshot completo
         painter.drawPixmap(0, 0, self.pixmap)
-        if self.mode == SPOTLIGHT_MODE:
+        if self.mode == MODE_SPOTLIGHT:
             self.drawSpotlight(painter, cursor_pos)
-        elif self.mode == LASER_MODE:
+        elif self.mode == MODE_LASER:
             self.drawLaser(painter, cursor_pos)
-        elif self.mode == PEN_MODE:
+        elif self.mode == MODE_PEN:
             self.drawLines(painter, cursor_pos)
 
     def draw_pen_tip(self, painter, pos, size=20):
@@ -407,11 +419,11 @@ class SpotlightOverlayWindow(QWidget):
     def handle_draw_command(self, command):
         match command:
             case "start_move":
-                if self.mode == PEN_MODE:
+                if self.mode == MODE_PEN:
                     self.start_pen_path()
 
             case "stop_move":
-                if self.mode == PEN_MODE and self.drawing:
+                if self.mode == MODE_PEN and self.drawing:
                     self.finish_pen_path()
 
             case "line_width_increase":
@@ -421,17 +433,17 @@ class SpotlightOverlayWindow(QWidget):
                 self.current_line_width = max(self.current_line_width - 1, 1)
 
     def mousePressEvent(self, event):
-        if self.mode == PEN_MODE:
+        if self.mode == MODE_PEN:
             self.start_pen_path()
             self.current_path.append(event.pos())
 
     def mouseMoveEvent(self, event):
-        if self.mode == PEN_MODE and self.drawing:
+        if self.mode == MODE_PEN and self.drawing:
             self.current_path.append(event.pos())
         self.update()
 
     def mouseReleaseEvent(self, event):
-        if self.mode == PEN_MODE and self.drawing:
+        if self.mode == MODE_PEN and self.drawing:
             self.finish_pen_path()
 
     # Other ShortCuts

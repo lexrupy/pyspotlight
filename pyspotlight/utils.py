@@ -5,17 +5,17 @@ from PyQt5.QtGui import (
 )
 from PyQt5.QtCore import QRect
 
-SPOTLIGHT_MODE = 0
-LASER_MODE = 1
-PEN_MODE = 2
-MOUSE_MODE = 3
+MODE_SPOTLIGHT = 0
+MODE_LASER = 1
+MODE_PEN = 2
+MODE_MOUSE = 3
 
 
 MODE_MAP = {
-    SPOTLIGHT_MODE: "Modo Spotlight",
-    LASER_MODE: "Modo Laser",
-    PEN_MODE: "Modo Caneta",
-    MOUSE_MODE: "Modo Mouse",
+    MODE_SPOTLIGHT: "Modo Spotlight",
+    MODE_LASER: "Modo Laser",
+    MODE_PEN: "Modo Caneta",
+    MODE_MOUSE: "Modo Mouse",
 }
 
 
