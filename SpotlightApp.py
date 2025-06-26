@@ -19,6 +19,7 @@ from pystray import Icon, Menu, MenuItem
 from pyspotlight.appcontext import AppContext
 from pyspotlight.devices import DeviceMonitor
 from pyspotlight.spotlight import SpotlightOverlayWindow
+from pyspotlight.settingswindow import SpotlightSettingsWindow
 from pyspotlight.infoverlay import InfOverlayWindow
 from pyspotlight.utils import capture_monitor_screenshot
 
@@ -80,8 +81,12 @@ class PySpotlightApp(QMainWindow):
 
         refresh_monitors_button = QPushButton("Atualizar Monitores")
         refresh_monitors_button.clicked.connect(self.refresh_screens)
+
+        settings_button = QPushButton("Configurações")
+        settings_button.clicked.connect(self.open_settings)
+
         monitor_layout.addWidget(refresh_monitors_button)
-        # monitor_layout.addWidget(refresh_button)
+        monitor_layout.addWidget(settings_button)
         main_layout.addLayout(monitor_layout)
 
         self.device_combo = QComboBox()
@@ -158,6 +163,10 @@ class PySpotlightApp(QMainWindow):
 
     def append_log(self, message):
         self.log_text.append(message)
+
+    def open_settings(self):
+        self.settings_window = SpotlightSettingsWindow(self.ctx)
+        self.settings_window.show()
 
     def thread_safe_log(self, message):
         self.log_signal.emit(message)
