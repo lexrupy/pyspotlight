@@ -23,7 +23,7 @@ class GenericVRBoxPointer(BasePointerDevice):
         (4, 1): "A",
         (4, 2): "B",
     }
-    LONG_PRESS_MS = 600  # tempo mínimo para considerar pressionamento longo
+    LONG_PRESS_MS = 800  # tempo mínimo para considerar pressionamento longo
     DOUBLE_CLICK_INTERVAL = 0.4  # segundos
 
     def __init__(self, app_ctx, hidraw_path):
@@ -34,6 +34,7 @@ class GenericVRBoxPointer(BasePointerDevice):
         # botao: {start_time, long_timer, repeat_timer, long_pressed}
         self._button_states = {}
         self._last_click_time = {}
+        self._last_release_time = {}  # novo
 
         self.add_known_path(hidraw_path)
         for device in self.find_all_event_devices_for_known():
@@ -52,7 +53,12 @@ class GenericVRBoxPointer(BasePointerDevice):
         last_click = self._last_click_time.get(botao, 0)
         time_since_last = now - last_click
 
-        is_second_click = 0 < time_since_last < self.DOUBLE_CLICK_INTERVAL
+        # is_second_click = 0 < time_since_last < self.DOUBLE_CLICK_INTERVAL
+        is_second_click = (
+            0 < time_since_last < self.DOUBLE_CLICK_INTERVAL
+            and self._last_release_time.get(botao, 0) > 0
+        )
+
         self._last_click_time[botao] = now
 
         state = {
@@ -60,16 +66,18 @@ class GenericVRBoxPointer(BasePointerDevice):
             "long_pressed": False,
             "repeat_active": False,
             "is_second_click": is_second_click,
+            "pending_click": not is_second_click,  # só dispara se for o primeiro
         }
 
         def set_long_pressed():
             state["long_pressed"] = True
             button_name = self._build_button_name(botao, long_press=True)
-            self.executa_acao(button_name, state=1)
             # Ativar repeat apenas no segundo clique + segurar
             if is_second_click:
                 state["repeat_active"] = True
                 self._repeat_timer(botao)
+            else:
+                self.executa_acao(button_name, state=1)
 
         long_timer = threading.Timer(self.LONG_PRESS_MS / 1000, set_long_pressed)
         long_timer.start()
@@ -92,6 +100,7 @@ class GenericVRBoxPointer(BasePointerDevice):
     def _repeat_timer(self, botao):
         state = self._button_states.get(botao)
         if state and state["repeat_active"]:
+            state["pending_click"] = False
             button = self._build_button_name(botao, repeat=True)
             self.executa_acao(button, state=1)
             t = threading.Timer(0.1, self._repeat_timer, args=(botao,))
@@ -106,15 +115,30 @@ class GenericVRBoxPointer(BasePointerDevice):
             state["long_timer"].cancel()
         if "repeat_timer" in state:
             state["repeat_timer"].cancel()
-        # Liberando combo se existir
+        # Libera combo
         for k in list(self._button_states):
             if self._button_states[k].get("combo_disparado"):
                 self._ctx.log(f"[Combo] {k} liberado (parte de combo)")
                 self._button_states[k]["combo_disparado"] = False
-        button = self._build_button_name(
-            botao, long_press=state.get("long_pressed", False)
-        )
-        self.executa_acao(button, state=0)
+
+        # Detecta double click curto
+        now = time.time()
+        last_release = self._last_release_time.get(botao, 0)
+        last_press = self._last_click_time.get(botao, 0)
+        self._last_release_time[botao] = now
+
+        duration = now - state["start_time"]
+
+        if (
+            0 < last_release
+            and (now - last_release) < self.DOUBLE_CLICK_INTERVAL
+            and duration < self.LONG_PRESS_MS / 1000
+        ):
+            state["pending_click"] = False
+            self.executa_acao(f"{botao}++", state=1)
+
+        elif not state["long_pressed"] and not state["repeat_active"]:
+            self.executa_acao(botao, state=1)
 
     def start_event_blocking(self):
         if not self._event_thread or not self._event_thread.is_alive():
