@@ -18,11 +18,17 @@ class BaseusOrangeDotAI(BasePointerDevice):
         self.last_click_time_113 = 0
         self.double_click_interval = 0.3  # segundos para considerar duplo clique
 
+        self._ctx.compatible_modes = [MODE_MOUSE, MODE_SPOTLIGHT, MODE_LASER, MODE_PEN]
+
     def monitor(self):
         super().monitor()
         self.start_hidraw_monitoring()
 
     def start_hidraw_monitoring(self):
+        if hasattr(self, "_hidraw_thread_started") and self._hidraw_thread_started:
+            return
+        self._hidraw_thread_started = True
+
         def run():
             try:
                 if os.path.exists(self.path):
@@ -67,7 +73,6 @@ class BaseusOrangeDotAI(BasePointerDevice):
 
     def processa_pacote_hid(self, data):
 
-        self._ctx.log(f"{list(data)}")
         if not (
             isinstance(data, bytes)
             and len(data) == 16
