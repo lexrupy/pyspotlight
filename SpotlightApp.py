@@ -11,9 +11,9 @@ from PyQt5.QtWidgets import (
     QWidget,
     QComboBox,
 )
-from PyQt5.QtGui import QGuiApplication, QFontMetrics
+from PyQt5.QtGui import QGuiApplication
 
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QRect, QPoint, QMetaObject
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from screeninfo import get_monitors
 from PIL import Image, ImageDraw
 from pystray import Icon, Menu, MenuItem

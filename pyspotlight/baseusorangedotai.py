@@ -192,66 +192,6 @@ class BaseusOrangeDotAI(BasePointerDevice):
                 if current_mode == MODE_SPOTLIGHT:
                     ow.adjust_overlay_color(0, -10)
 
-    # def prevent_key_and_mouse_events(self, devices):
-    #     fd_para_dev = {}
-    #     for dev in devices:
-    #         try:
-    #             dev.grab()
-    #             fd_para_dev[dev.fd] = dev
-    #             self._ctx.log(f"* Monitorado: {dev.path}")
-    #         except Exception as e:
-    #             self._ctx.log(
-    #                 f"* Erro ao monitorar dispositivo {dev.path}: {e}. Tente executar como root ou ajuste as regras udev."
-    #             )
-    #     self._ctx.log("* Monitorando dispositivos...")
-    #
-    #     try:
-    #         while True:
-    #             r, _, _ = select.select(fd_para_dev, [], [])
-    #             for fd in r:
-    #                 dev = fd_para_dev.get(fd)
-    #                 if dev is None:
-    #                     continue
-    #                 try:
-    #                     for event in dev.read():
-    #                         if event.type == evdev.ecodes.EV_REL or (
-    #                             event.type == evdev.ecodes.EV_KEY
-    #                             and event.code
-    #                             in (
-    #                                 evdev.ecodes.BTN_LEFT,
-    #                                 evdev.ecodes.BTN_RIGHT,
-    #                             )
-    #                         ):
-    #                             # Repassa evento virtual
-    #                             self._ctx.ui.emit((event.type, event.code), event.value)
-    #
-    #                 except OSError as e:
-    #                     if e.errno == 19:  # No such device
-    #                         self._ctx.log(f"- Dispositivo desconectado: {dev.path}")
-    #                         # Remove dispositivo da lista para não monitorar mais
-    #                         fd_para_dev.pop(fd, None)
-    #                         try:
-    #                             dev.ungrab()
-    #                         except Exception:
-    #                             pass
-    #                         # Opcional: se não há mais dispositivos, pode encerrar ou esperar
-    #                         if not fd_para_dev:
-    #                             self._ctx.log(
-    #                                 "* Nenhum dispositivo restante para monitorar. Encerrando thread."
-    #                             )
-    #                             return
-    #                     else:
-    #                         raise
-    #
-    #     except KeyboardInterrupt:
-    #         self._ctx.log("\n* Encerrando monitoramento.")
-    #     finally:
-    #         for dev in devices:
-    #             try:
-    #                 dev.ungrab()
-    #             except Exception:
-    #                 pass
-
     def prevent_key_and_mouse_events(self, devices):
         fd_para_dev = {}
         for dev in devices:

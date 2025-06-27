@@ -43,6 +43,10 @@ class BasePointerDevice(metaclass=SingletonMeta):
     #         name = self.__class__.__name__
     #     return name
     #
+
+    def __str__(self):
+        return self.display_name()
+
     def display_name(self):
         # Se a classe fornecer, usamos ela
         desc = getattr(self.__class__, "PRODUCT_DESCRIPTION", None)
