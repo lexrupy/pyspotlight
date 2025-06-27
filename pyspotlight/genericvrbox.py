@@ -23,8 +23,9 @@ class GenericVRBoxPointer(BasePointerDevice):
         (4, 1): "A",
         (4, 2): "B",
     }
-    LONG_PRESS_MS = 800  # tempo mínimo para considerar pressionamento longo
+    LONG_PRESS_INTERVAL = 0.6  # tempo mínimo para considerar pressionamento longo
     DOUBLE_CLICK_INTERVAL = 0.4  # segundos
+    COMBO_WINDOW = 0.3
 
     def __init__(self, app_ctx, hidraw_path):
         super().__init__(app_ctx=app_ctx, hidraw_path=hidraw_path)
@@ -34,7 +35,8 @@ class GenericVRBoxPointer(BasePointerDevice):
         # botao: {start_time, long_timer, repeat_timer, long_pressed}
         self._button_states = {}
         self._last_click_time = {}
-        self._last_release_time = {}  # novo
+        self._last_release_time = {}
+        self._pending_click_timers = {}  # botao: threading.Timer
 
         self.add_known_path(hidraw_path)
         for device in self.find_all_event_devices_for_known():
@@ -53,7 +55,6 @@ class GenericVRBoxPointer(BasePointerDevice):
         last_click = self._last_click_time.get(botao, 0)
         time_since_last = now - last_click
 
-        # is_second_click = 0 < time_since_last < self.DOUBLE_CLICK_INTERVAL
         is_second_click = (
             0 < time_since_last < self.DOUBLE_CLICK_INTERVAL
             and self._last_release_time.get(botao, 0) > 0
@@ -66,41 +67,85 @@ class GenericVRBoxPointer(BasePointerDevice):
             "long_pressed": False,
             "repeat_active": False,
             "is_second_click": is_second_click,
-            "pending_click": not is_second_click,  # só dispara se for o primeiro
+            "combo_disparado": False,
         }
 
         def set_long_pressed():
             state["long_pressed"] = True
-            button_name = self._build_button_name(botao, long_press=True)
-            # Ativar repeat apenas no segundo clique + segurar
-            if is_second_click:
-                state["repeat_active"] = True
-                self._repeat_timer(botao)
-            else:
-                self.executa_acao(button_name, state=1)
+            # Aqui detecta combo no momento do long press
+            combo_detected = False
+            for outro_botao, outro_estado in self._button_states.items():
+                if outro_botao == botao:
+                    continue
+                if outro_estado.get("combo_disparado"):
+                    continue
+                # Checa se outro botão também está em long press
+                if outro_estado.get("long_pressed"):
+                    tempo_entre = abs(state["start_time"] - outro_estado["start_time"])
+                    if tempo_entre < self.COMBO_WINDOW:
+                        # Combo detectado
+                        nomes = sorted([botao, outro_botao])
+                        combo_nome = "+".join(nomes)
+                        self._ctx.log(f"[Combo] {combo_nome} detectado")
 
-        long_timer = threading.Timer(self.LONG_PRESS_MS / 1000, set_long_pressed)
+                        # Marca ambos como combo disparado
+                        self._button_states[botao]["combo_disparado"] = True
+                        self._button_states[outro_botao]["combo_disparado"] = True
+
+                        # Cancela timers simples pendentes dos dois botões
+                        for b in (botao, outro_botao):
+                            t = self._pending_click_timers.pop(b, None)
+                            if t:
+                                t.cancel()
+
+                        self.executa_acao(combo_nome, state=1)
+                        combo_detected = True
+                        break
+
+            if not combo_detected:
+                timer = self._pending_click_timers.pop(botao, None)
+                if timer:
+                    timer.cancel()
+                button_name = self._build_button_name(botao, long_press=True)
+                if is_second_click:
+                    state["repeat_active"] = True
+                    self._repeat_timer(botao)
+                else:
+                    self.executa_acao(button_name, state=1)
+
+        long_timer = threading.Timer(self.LONG_PRESS_INTERVAL, set_long_pressed)
         long_timer.start()
         state["long_timer"] = long_timer
+
         self._button_states[botao] = state
-        # Verificar combinações conhecidas de botões simultâneos
-        # Exemplo: G1 + G2
-        if (
-            "G1" in self._button_states
-            and "G2" in self._button_states
-            and not self._button_states["G1"].get("combo_disparado")
-            and not self._button_states["G2"].get("combo_disparado")
-        ):
-            combo_nome = "G1+G2"
-            self._ctx.log(f"[Combo] {combo_nome} detectado")
-            self._button_states["G1"]["combo_disparado"] = True
-            self._button_states["G2"]["combo_disparado"] = True
-            self.executa_acao(combo_nome, state=1)
+
+        # Cancelar clique simples pendente se houver
+        if botao in self._pending_click_timers:
+            self._pending_click_timers[botao].cancel()
+            del self._pending_click_timers[botao]
+
+        # Agenda clique simples só se não for second click e sem combo detectado ainda
+        if not is_second_click:
+
+            def emitir_clique_simples():
+                current_state = self._button_states.get(botao)
+                if current_state is None or (
+                    not current_state["long_pressed"]
+                    and not current_state["repeat_active"]
+                    and not current_state.get("combo_disparado", False)
+                ):
+                    self.executa_acao(botao, state=1)
+                self._pending_click_timers.pop(botao, None)
+
+            click_timer = threading.Timer(
+                self.LONG_PRESS_INTERVAL, emitir_clique_simples
+            )
+            click_timer.start()
+            self._pending_click_timers[botao] = click_timer
 
     def _repeat_timer(self, botao):
         state = self._button_states.get(botao)
         if state and state["repeat_active"]:
-            state["pending_click"] = False
             button = self._build_button_name(botao, repeat=True)
             self.executa_acao(button, state=1)
             t = threading.Timer(0.1, self._repeat_timer, args=(botao,))
@@ -111,34 +156,44 @@ class GenericVRBoxPointer(BasePointerDevice):
         state = self._button_states.pop(botao, None)
         if not state:
             return
+
+        if state.get("combo_disparado"):
+            # não fazer nada no release
+            return
+
         if "long_timer" in state:
             state["long_timer"].cancel()
         if "repeat_timer" in state:
             state["repeat_timer"].cancel()
+
         # Libera combo
         for k in list(self._button_states):
             if self._button_states[k].get("combo_disparado"):
                 self._ctx.log(f"[Combo] {k} liberado (parte de combo)")
                 self._button_states[k]["combo_disparado"] = False
 
-        # Detecta double click curto
         now = time.time()
+        duration = now - state["start_time"]
         last_release = self._last_release_time.get(botao, 0)
-        last_press = self._last_click_time.get(botao, 0)
+
         self._last_release_time[botao] = now
 
-        duration = now - state["start_time"]
-
         if (
-            0 < last_release
+            last_release > 0
             and (now - last_release) < self.DOUBLE_CLICK_INTERVAL
-            and duration < self.LONG_PRESS_MS / 1000
+            and duration < self.LONG_PRESS_INTERVAL
+            and not state["long_pressed"]
         ):
-            state["pending_click"] = False
             self.executa_acao(f"{botao}++", state=1)
+            return
 
-        elif not state["long_pressed"] and not state["repeat_active"]:
-            self.executa_acao(botao, state=1)
+        # Caso 2: já emitiu long ou repeat, então não faz mais nada
+        if state["long_pressed"] or state["repeat_active"]:
+            return
+
+        # if not state["long_pressed"] and not state["repeat_active"]:
+        #     if duration >= 0.02:  # evita ruído de toque acidental
+        #         self.executa_acao(botao, state=1)
 
     def start_event_blocking(self):
         if not self._event_thread or not self._event_thread.is_alive():
@@ -182,22 +237,30 @@ class GenericVRBoxPointer(BasePointerDevice):
             case "G1":
                 if current_mode == MODE_MOUSE:
                     self.emit_key_press(self._ctx.ui, uinput.KEY_PAGEDOWN)
-                elif current_mode == MODE_PEN:
+            case "G1++":
+                pass
+            case "G1+long":
+                self.emit_key_chord(self._ctx.ui, [uinput.KEY_LEFTSHIFT, uinput.KEY_F5])
+            case "G1+repeat":
+                if current_mode == MODE_PEN:
                     ow.change_line_width(+1)
                 elif current_mode == MODE_SPOTLIGHT:
                     ow.change_spot_radius(+1)
-            case "G1+long":
-                self.emit_key_chord(self._ctx.ui, [uinput.KEY_LEFTSHIFT, uinput.KEY_F5])
             case "G2":
                 if current_mode == MODE_MOUSE:
                     self.emit_key_press(self._ctx.ui, uinput.KEY_PAGEUP)
-                elif current_mode == MODE_PEN:
+            case "G2++":
+                pass
+            case "G2+long":
+                pass
+            case "G2+repeat":
+                if current_mode == MODE_PEN:
                     ow.change_line_width(-1)
                 elif current_mode == MODE_SPOTLIGHT:
                     ow.change_spot_radius(-1)
-            case "G2+long":
-                pass
             case "A":
+                pass
+            case "A++":
                 pass
             case "A+long":
                 pass
@@ -206,17 +269,29 @@ class GenericVRBoxPointer(BasePointerDevice):
                     self.emit_key_press(self._ctx.ui, uinput.KEY_B)
                 elif current_mode == MODE_PEN:
                     ow.clear_drawing()
+            case "B++":
+                pass
             case "B+long":
                 ow.set_mouse_mode()
+            case "B+repeat":
+                pass
             case "C":
                 ow.switch_mode()
+            case "C++":
+                pass
             case "C+long":
                 ow.switch_mode(step=-1)
+            case "C+repeat":
+                pass
             case "D":
                 if current_mode in [MODE_PEN, MODE_LASER]:
                     ow.next_color()
+            case "D++":
+                pass
             case "D+long":
                 ow.set_mouse_mode()
+            case "D+repeat":
+                pass
 
     @classmethod
     def is_known_device(cls, device_info):

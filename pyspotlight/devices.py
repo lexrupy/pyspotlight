@@ -39,6 +39,7 @@ class DeviceMonitor:
         else:
             dev = self._monitored_devices[cls]
             dev.add_known_path(path)
+            # dev.ensure_monitoring()
             self._ctx.log(
                 f"Dispositivo {cls.__name__} já monitorado, adicionando path: {path}"
             )

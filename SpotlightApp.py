@@ -10,13 +10,15 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QWidget,
     QComboBox,
+    QAction,
+    QSystemTrayIcon,
+    QMenu,
 )
-from PyQt5.QtGui import QGuiApplication
+from PyQt5.QtGui import QGuiApplication, QIcon, QPixmap, QPainter, QColor
 
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from screeninfo import get_monitors
 from PIL import Image, ImageDraw
-from pystray import Icon, Menu, MenuItem
 from pyspotlight.appcontext import AppContext
 from pyspotlight.devices import DeviceMonitor
 from pyspotlight.spotlight import SpotlightOverlayWindow
@@ -38,6 +40,13 @@ class PySpotlightApp(QMainWindow):
         super().__init__()
         self.setWindowTitle("Py-Spotlight")
         self.setGeometry(100, 100, 800, 500)
+
+        self.tray_icon = None
+        self.create_tray_icon()
+
+        # Quando fechar a janela, ao invés de fechar, esconder
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMinimizeButtonHint)
+        self.setMinimumSize(400, 300)
 
         self.running = True
         self.icon = None
@@ -211,23 +220,53 @@ class PySpotlightApp(QMainWindow):
         self.create_overlay()
         self.append_log(f"> Tela selecionada: {idx}")
 
+    def show_normal(self):
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def on_tray_icon_activated(self, reason):
+        if reason == QSystemTrayIcon.Trigger:
+            # Clique simples na bandeja
+            if self.isVisible():
+                self.hide()
+            else:
+                self.show_normal()
+                self.activateWindow()
+
     def hide_to_tray(self):
         self.hide()
-        if self.icon is None:
-            self.create_tray_icon()
+        self.append_log("Janela oculta. Clique no ícone da bandeja para restaurar.")
 
     def create_tray_icon(self):
-        def restore():
-            self.show()
-            if self.icon:
-                self.icon.stop()
-                self.icon = None
+        # Criar um ícone simples na memória (círculo verde)
+        size = 64
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setBrush(QColor("lime"))
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(0, 0, size, size)
+        painter.end()
 
-        image = self.create_image()
-        self.icon = Icon("Py-Spotlight", image, "Py-Spotlight")
-        self.icon.menu = Menu(MenuItem("Restaurar", lambda: restore()))
+        icon = QIcon(pixmap)
 
-        threading.Thread(target=self.icon.run, daemon=True).start()
+        self.tray_icon = QSystemTrayIcon(icon, self)
+        menu = QMenu()
+
+        restore_action = QAction("Restaurar", self)
+        restore_action.triggered.connect(self.show_normal)
+        menu.addAction(restore_action)
+
+        exit_action = QAction("Sair", self)
+        exit_action.triggered.connect(self.exit_app)
+        menu.addAction(exit_action)
+
+        self.tray_icon.setContextMenu(menu)
+
+        self.tray_icon.activated.connect(self.on_tray_icon_activated)
+
+        self.tray_icon.show()
 
     def create_image(self):
         image = Image.new("RGB", (64, 64), "black")
