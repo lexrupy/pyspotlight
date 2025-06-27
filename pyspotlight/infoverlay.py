@@ -2,11 +2,11 @@
 
 from PyQt5.QtWidgets import QWidget, QLabel
 from PyQt5.QtGui import QFont, QColor
-from PyQt5.QtCore import Qt, QTimer, QMetaObject
+from PyQt5.QtCore import Qt
 
 from PyQt5.QtWidgets import QWidget, QLabel
 from PyQt5.QtGui import QFont, QColor, QPainter, QFontMetrics
-from PyQt5.QtCore import Qt, QTimer, QRect, QPoint, pyqtSignal, QObject
+from PyQt5.QtCore import Qt, QRect, QPoint
 
 
 class InfOverlayWindow(QWidget):
