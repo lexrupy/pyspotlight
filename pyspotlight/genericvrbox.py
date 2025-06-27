@@ -29,26 +29,99 @@ class GenericVRBoxPointer(BasePointerDevice):
     def __init__(self, app_ctx, hidraw_path):
         super().__init__(app_ctx=app_ctx, hidraw_path=hidraw_path)
 
-        self.botao_ativo = None
-        self.tempo_pressao = 0
-        self.pressao_longa_disparada = False
-
-        self._repeat_timer = None
-        self._repeat_active = False
-        self.last_press_time = 0
-
         self._event_thread = None
+
+        # botao: {start_time, long_timer, repeat_timer, long_pressed}
+        self._button_states = {}
+        self._last_click_time = {}
 
         self.add_known_path(hidraw_path)
         for device in self.find_all_event_devices_for_known():
             self.add_known_path(device.path)
+
+    def _build_button_name(self, button, long_press=False, repeat=False):
+        parts = [button]
+        if repeat:
+            parts.append("repeat")
+        elif long_press:
+            parts.append("long")
+        return "+".join(parts)
+
+    def _on_button_press(self, botao):
+        now = time.time()
+        last_click = self._last_click_time.get(botao, 0)
+        time_since_last = now - last_click
+
+        is_second_click = 0 < time_since_last < self.DOUBLE_CLICK_INTERVAL
+        self._last_click_time[botao] = now
+
+        state = {
+            "start_time": now,
+            "long_pressed": False,
+            "repeat_active": False,
+            "is_second_click": is_second_click,
+        }
+
+        def set_long_pressed():
+            state["long_pressed"] = True
+            button_name = self._build_button_name(botao, long_press=True)
+            self.executa_acao(button_name, state=1)
+            # Ativar repeat apenas no segundo clique + segurar
+            if is_second_click:
+                state["repeat_active"] = True
+                self._repeat_timer(botao)
+
+        long_timer = threading.Timer(self.LONG_PRESS_MS / 1000, set_long_pressed)
+        long_timer.start()
+        state["long_timer"] = long_timer
+        self._button_states[botao] = state
+        # Verificar combinações conhecidas de botões simultâneos
+        # Exemplo: G1 + G2
+        if (
+            "G1" in self._button_states
+            and "G2" in self._button_states
+            and not self._button_states["G1"].get("combo_disparado")
+            and not self._button_states["G2"].get("combo_disparado")
+        ):
+            combo_nome = "G1+G2"
+            self._ctx.log(f"[Combo] {combo_nome} detectado")
+            self._button_states["G1"]["combo_disparado"] = True
+            self._button_states["G2"]["combo_disparado"] = True
+            self.executa_acao(combo_nome, state=1)
+
+    def _repeat_timer(self, botao):
+        state = self._button_states.get(botao)
+        if state and state["repeat_active"]:
+            button = self._build_button_name(botao, repeat=True)
+            self.executa_acao(button, state=1)
+            t = threading.Timer(0.1, self._repeat_timer, args=(botao,))
+            state["repeat_timer"] = t
+            t.start()
+
+    def _on_button_release(self, botao):
+        state = self._button_states.pop(botao, None)
+        if not state:
+            return
+        if "long_timer" in state:
+            state["long_timer"].cancel()
+        if "repeat_timer" in state:
+            state["repeat_timer"].cancel()
+        # Liberando combo se existir
+        for k in list(self._button_states):
+            if self._button_states[k].get("combo_disparado"):
+                self._ctx.log(f"[Combo] {k} liberado (parte de combo)")
+                self._button_states[k]["combo_disparado"] = False
+        button = self._build_button_name(
+            botao, long_press=state.get("long_pressed", False)
+        )
+        self.executa_acao(button, state=0)
 
     def start_event_blocking(self):
         if not self._event_thread or not self._event_thread.is_alive():
             devs = self.find_all_event_devices_for_known()
             if devs:
                 self._event_thread = threading.Thread(
-                    target=self.prevent_key_and_mouse_events,
+                    target=self.read_input_events,
                     args=(devs,),
                     daemon=True,
                 )
@@ -72,60 +145,54 @@ class GenericVRBoxPointer(BasePointerDevice):
                     self._ctx.log(f"* Erro ao acessar {path}: {e}")
         return devices
 
-    def executa_acao(self, botao, state=0):
-
-        # TODO: Calcular aqui se é long-press ou se é repeat
-        long_press_state = False
-        repeat = False
-        # self._ctx.log(
-        #     f"[Evento] Botão {botao} - pressão longa: {long_press_state} - repeat: {repeat}"
-        # )
+    def executa_acao(self, botao, state):
+        # state = 0 botão solto, 1 botão pressionado
+        self._ctx.log(f"[Evento] Botão {botao}")
 
         ow = self._ctx.overlay_window
         current_mode = self._ctx.overlay_window.current_mode()
         # Exemplo para botão A
-        if botao == "C":
-            if long_press_state and current_mode == MODE_MOUSE:
-                ow.switch_mode(step=-1)
-            else:
-                ow.switch_mode()
-
-        elif botao == "B":
-            if long_press_state and current_mode != MODE_MOUSE:
-                ow.set_mouse_mode()
-            if current_mode == MODE_MOUSE:
-                self.emit_key_press(self._ctx.ui, uinput.KEY_B)
-            elif current_mode == MODE_PEN:
-                ow.clear_drawing()
-
-        elif botao == "A":
-            if long_press_state:
+        match botao:
+            case "G1+G2":
                 pass
-
-        elif botao == "D":
-            if long_press_state:
+            case "G1":
+                if current_mode == MODE_MOUSE:
+                    self.emit_key_press(self._ctx.ui, uinput.KEY_PAGEDOWN)
+                elif current_mode == MODE_PEN:
+                    ow.change_line_width(+1)
+                elif current_mode == MODE_SPOTLIGHT:
+                    ow.change_spot_radius(+1)
+            case "G1+long":
+                self.emit_key_chord(self._ctx.ui, [uinput.KEY_LEFTSHIFT, uinput.KEY_F5])
+            case "G2":
+                if current_mode == MODE_MOUSE:
+                    self.emit_key_press(self._ctx.ui, uinput.KEY_PAGEUP)
+                elif current_mode == MODE_PEN:
+                    ow.change_line_width(-1)
+                elif current_mode == MODE_SPOTLIGHT:
+                    ow.change_spot_radius(-1)
+            case "G2+long":
+                pass
+            case "A":
+                pass
+            case "A+long":
+                pass
+            case "B":
+                if current_mode == MODE_MOUSE:
+                    self.emit_key_press(self._ctx.ui, uinput.KEY_B)
+                elif current_mode == MODE_PEN:
+                    ow.clear_drawing()
+            case "B+long":
                 ow.set_mouse_mode()
-            else:
+            case "C":
+                ow.switch_mode()
+            case "C+long":
+                ow.switch_mode(step=-1)
+            case "D":
                 if current_mode in [MODE_PEN, MODE_LASER]:
                     ow.next_color()
-
-        elif botao == "G1":
-            if current_mode == MODE_MOUSE and long_press_state:
-                self.emit_key_chord(self._ctx.ui, [uinput.KEY_LEFTSHIFT, uinput.KEY_F5])
-            if current_mode == MODE_MOUSE:
-                self.emit_key_press(self._ctx.ui, uinput.KEY_PAGEDOWN)
-            elif current_mode == MODE_PEN:
-                ow.change_line_width(+1)
-            elif current_mode == MODE_SPOTLIGHT:
-                ow.change_spot_radius(+1)
-
-        elif botao == "G2":
-            if current_mode == MODE_MOUSE:
-                self.emit_key_press(self._ctx.ui, uinput.KEY_PAGEUP)
-            elif current_mode == MODE_PEN:
-                ow.change_line_width(-1)
-            elif current_mode == MODE_SPOTLIGHT:
-                ow.change_spot_radius(-1)
+            case "D+long":
+                ow.set_mouse_mode()
 
     @classmethod
     def is_known_device(cls, device_info):
@@ -139,7 +206,7 @@ class GenericVRBoxPointer(BasePointerDevice):
         except subprocess.CalledProcessError:
             return False
 
-    def prevent_key_and_mouse_events(self, devices):
+    def read_input_events(self, devices):
         fd_para_dev = {}
         for dev in devices:
             try:
@@ -185,15 +252,11 @@ class GenericVRBoxPointer(BasePointerDevice):
                                         botao = "SL"
                                     case ec.KEY_PREVIOUSSONG:
                                         botao = "SR"
-                                self.executa_acao(botao, state=event.value)
-                                if botao:
-                                    self._ctx.log(
-                                        f"BOTAO: {botao} STATE: {event.value}"
-                                    )
-                                else:
-                                    self._ctx.log(
-                                        f"KEY: {all_keys[event.code]} - {event.code} STATE: {event.value}"
-                                    )
+
+                                if event.value == 1:
+                                    self._on_button_press(botao)
+                                elif event.value == 0:
+                                    self._on_button_release(botao)
 
                     except OSError as e:
                         if e.errno == 19:  # No such device
