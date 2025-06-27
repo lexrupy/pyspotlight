@@ -13,6 +13,7 @@ class AppContext:
         self._log_function = log_function
         self._overlay_window = overlay_window
         self._show_info_function = show_info_function
+        self._compatible_modes = []
 
         self._ui = uinput.Device(
             [
@@ -59,6 +60,14 @@ class AppContext:
         self._selected_screen = scr
 
     @property
+    def compatible_modes(self):
+        return self._compatible_modes
+
+    @compatible_modes.setter
+    def compatible_modes(self, modes):
+        self._compatible_modes = modes
+
+    @property
     def log_function(self):
         return self._log_function
 
@@ -74,10 +83,6 @@ class AppContext:
     def overlay_window(self, window):
         self._overlay_window = window
 
-    def log(self, message):
-        if self._log_function:
-            self._log_function(message)
-
     @property
     def show_info_function(self):
         return self._show_info_function
@@ -85,6 +90,10 @@ class AppContext:
     @show_info_function.setter
     def show_info_function(self, func):
         self._show_info_function = func
+
+    def log(self, message):
+        if self._log_function:
+            self._log_function(message)
 
     def show_info(self, message):
         if self._show_info_function:

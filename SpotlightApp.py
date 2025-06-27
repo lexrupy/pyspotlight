@@ -145,29 +145,46 @@ class PySpotlightApp(QMainWindow):
             self.device_combo.addItem(label, userData=dev)
 
     def create_overlay(self):
+
+        # Fecha janela anterior se existir
+        # if self.ctx.overlay_window:
+        #     self.ctx.overlay_window.close()
+        #     self.ctx.overlay_window.deleteLater()
+        #     self.ctx.overlay_window = None
         screen_index = self.ctx.selected_screen
         screens = QGuiApplication.screens()
-        geometry = screens[screen_index].geometry()
+        # geometry = screens[screen_index].geometry()
         screenshot, geometry = capture_monitor_screenshot(screen_index)
 
+        # Fecha janela anterior se existir
         if self.ctx.overlay_window:
-            self.ctx.overlay_window.close()
-
-        self.ctx.overlay_window = SpotlightOverlayWindow(
-            context=self.ctx,
-            screenshot=screenshot,
-            screen_geometry=geometry,
-            monitor_index=screen_index,
-        )
+            self.ctx.overlay_window.monitor_index = screen_index
+            self.ctx.overlay_window.setGeometry(geometry)
+            # self.ctx.overlay_window.close()
+        else:
+            self.ctx.overlay_window = SpotlightOverlayWindow(
+                context=self.ctx,
+                screenshot=screenshot,
+                screen_geometry=geometry,
+                monitor_index=screen_index,
+            )
         # self.ctx.overlay_window.showFullScreen()
 
     def setup_info_overlay(self):
+        # Fecha janela anterior se existir
+        # if self.info_overlay:
+        #     self.info_overlay.close()
+        #     self.info_overlay.deleteLater()
+        #     self.info_overlay = None
+
         # Pega o monitor que não está sendo usado pelo spotlight
         all_screens = QGuiApplication.screens()
         target_index = 0
         if len(all_screens) > 1:
             target_index = 1 if self.ctx.selected_screen == 0 else 0
         geometry = all_screens[target_index].geometry()
+        if self.info_overlay:
+            self.info_overlay.setGeometry(geometry)
         self.info_overlay = InfOverlayWindow(geometry)
 
     def show_info(self, mensagem):
@@ -217,6 +234,7 @@ class PySpotlightApp(QMainWindow):
         idx = self.screen_combo.currentIndex()
         self.ctx.selected_screen = idx
         self.create_overlay()
+        self.setup_info_overlay()
         self.append_log(f"> Tela selecionada: {idx}")
 
     def show_normal(self):

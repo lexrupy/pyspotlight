@@ -36,7 +36,7 @@ class SpotlightOverlayWindow(QWidget):
     def __init__(self, context, screenshot, screen_geometry, monitor_index):
         super().__init__()
 
-        self.ctx = context
+        self._ctx = context
 
         self.setWindowFlags(
             Qt.FramelessWindowHint
@@ -49,7 +49,7 @@ class SpotlightOverlayWindow(QWidget):
         self.setCursor(Qt.BlankCursor)
 
         self.mode = MODE_MOUSE
-        self.last_mode = MODE_MOUSE
+        self.last_pointer_mode = MODE_SPOTLIGHT
 
         self.last_key_time = 0
         self.last_key_pressed = 0
@@ -167,21 +167,46 @@ class SpotlightOverlayWindow(QWidget):
         self.update()
 
     def set_spotlight_mode(self):
-        self.mode = MODE_SPOTLIGHT
-        self.capture_screenshot()
-        self.update()
+        self.switch_mode(direct_mode=MODE_SPOTLIGHT)
 
     def set_mouse_mode(self):
-        self.mode = MODE_MOUSE
-        self.hide()
+        self.switch_mode(direct_mode=MODE_MOUSE)
+
+    def set_laser_mode(self):
+        self.switch_mode(direct_mode=MODE_LASER)
+
+    def set_pen_mode(self):
+        self.switch_mode(direct_mode=MODE_PEN)
+
+    def set_last_pointer_mode(self):
+        if self.last_pointer_mode in self._ctx.compatible_modes:
+            self.switch_mode(direct_mode=self.last_pointer_mode)
 
     def switch_mode(self, step=1, direct_mode=-1):
+        compatible = self._ctx.compatible_modes
+        all_modes = list(MODE_MAP.keys())  # usa ordem de definição dos modos
+        if not compatible:
+            return
+
         if direct_mode >= 0:
-            self.mode = direct_mode
-            # self.is_in_auto = direct_mode == MODE_AUTO
-        else:
-            self.mode = (self.mode + step) % 4
-            # self.is_in_auto = False
+            if direct_mode in compatible:
+                self._ctx.log(f"Modo direto: {MODE_MAP[direct_mode]}")
+                self.apply_mode_change(direct_mode)
+            return
+
+        # Busca o próximo modo compatível
+        current_index = all_modes.index(self.mode) if self.mode in all_modes else 0
+        total_modes = len(all_modes)
+
+        for i in range(1, total_modes + 1):  # evita loop infinito
+            next_index = (current_index + step * i) % total_modes
+            next_mode = all_modes[next_index]
+            if next_mode in compatible:
+                self.apply_mode_change(next_mode)
+                return
+
+    def apply_mode_change(self, new_mode):
+        self.mode = new_mode
 
         if self.mode == MODE_MOUSE:
             self.hide()
@@ -190,10 +215,10 @@ class SpotlightOverlayWindow(QWidget):
             self.update()
 
         if self.mode in [MODE_SPOTLIGHT, MODE_LASER, MODE_PEN]:
-            self.last_mode = self.mode
+            self.last_pointer_mode = self.mode
 
-        self.ctx.log(f"Modo atual: {MODE_MAP[self.mode]}")
-        self.ctx.show_info(MODE_MAP[self.mode])
+        self._ctx.log(f"Modo atual: {MODE_MAP[self.mode]}")
+        self._ctx.show_info(MODE_MAP[self.mode])
 
     def change_spot_radius(self, increase=1):
         if increase == 0:
@@ -488,7 +513,7 @@ class SpotlightOverlayWindow(QWidget):
 
     def quit(self):
         self.save_config()
-        QApplication.quit()
+        self.set_mouse_mode()
 
 
 if __name__ == "__main__":

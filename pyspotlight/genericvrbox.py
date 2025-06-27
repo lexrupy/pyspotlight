@@ -29,14 +29,13 @@ class GenericVRBoxPointer(BasePointerDevice):
 
     def __init__(self, app_ctx, hidraw_path):
         super().__init__(app_ctx=app_ctx, hidraw_path=hidraw_path)
-
         self._event_thread = None
-
         # botao: {start_time, long_timer, repeat_timer, long_pressed}
         self._button_states = {}
         self._last_click_time = {}
         self._last_release_time = {}
         self._pending_click_timers = {}  # botao: threading.Timer
+        self._ctx.compatible_modes = [MODE_MOUSE, MODE_SPOTLIGHT, MODE_LASER]
 
         self.add_known_path(hidraw_path)
         for device in self.find_all_event_devices_for_known():
@@ -225,12 +224,8 @@ class GenericVRBoxPointer(BasePointerDevice):
         return devices
 
     def executa_acao(self, botao, state):
-        # state = 0 botão solto, 1 botão pressionado
-        self._ctx.log(f"[Evento] Botão {botao}")
-
         ow = self._ctx.overlay_window
         current_mode = self._ctx.overlay_window.current_mode()
-        # Exemplo para botão A
         match botao:
             case "G1+G2":
                 pass
@@ -238,25 +233,26 @@ class GenericVRBoxPointer(BasePointerDevice):
                 if current_mode == MODE_MOUSE:
                     self.emit_key_press(self._ctx.ui, uinput.KEY_PAGEDOWN)
             case "G1++":
-                pass
+                if current_mode in [MODE_LASER]:
+                    ow.next_color()
             case "G1+long":
                 self.emit_key_chord(self._ctx.ui, [uinput.KEY_LEFTSHIFT, uinput.KEY_F5])
             case "G1+repeat":
-                if current_mode == MODE_PEN:
-                    ow.change_line_width(+1)
-                elif current_mode == MODE_SPOTLIGHT:
+                if current_mode == MODE_SPOTLIGHT:
                     ow.change_spot_radius(+1)
             case "G2":
                 if current_mode == MODE_MOUSE:
                     self.emit_key_press(self._ctx.ui, uinput.KEY_PAGEUP)
             case "G2++":
-                pass
+                if current_mode in [MODE_LASER]:
+                    ow.next_color()
             case "G2+long":
-                pass
+                if current_mode != MODE_MOUSE:
+                    ow.set_mouse_mode()
+                else:
+                    ow.set_last_pointer_mode()
             case "G2+repeat":
-                if current_mode == MODE_PEN:
-                    ow.change_line_width(-1)
-                elif current_mode == MODE_SPOTLIGHT:
+                if current_mode == MODE_SPOTLIGHT:
                     ow.change_spot_radius(-1)
             case "A":
                 pass
@@ -267,29 +263,26 @@ class GenericVRBoxPointer(BasePointerDevice):
             case "B":
                 if current_mode == MODE_MOUSE:
                     self.emit_key_press(self._ctx.ui, uinput.KEY_B)
-                elif current_mode == MODE_PEN:
-                    ow.clear_drawing()
             case "B++":
                 pass
             case "B+long":
-                ow.set_mouse_mode()
+                ow.set_laser_mode()
             case "B+repeat":
                 pass
             case "C":
                 ow.switch_mode()
             case "C++":
-                pass
-            case "C+long":
                 ow.switch_mode(step=-1)
+            case "C+long":
+                ow.set_spotlight_mode()
             case "C+repeat":
                 pass
             case "D":
-                if current_mode in [MODE_PEN, MODE_LASER]:
-                    ow.next_color()
+                pass
             case "D++":
                 pass
             case "D+long":
-                ow.set_mouse_mode()
+                pass
             case "D+repeat":
                 pass
 
