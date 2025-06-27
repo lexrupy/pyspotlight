@@ -27,10 +27,12 @@ class GenericVRBoxPointer(BasePointerDevice):
     def __init__(self, app_ctx, hidraw_path):
         super().__init__(app_ctx=app_ctx, hidraw_path=hidraw_path)
         # botao: {start_time, long_timer, repeat_timer, long_pressed}
+
         self._button_states = {}
         self._last_click_time = {}
         self._last_release_time = {}
         self._pending_click_timers = {}  # botao: threading.Timer
+        self._lock = threading.Lock()
         self._ctx.compatible_modes = [MODE_MOUSE, MODE_SPOTLIGHT, MODE_LASER]
 
     def _build_button_name(self, button, long_press=False, repeat=False):
@@ -99,7 +101,8 @@ class GenericVRBoxPointer(BasePointerDevice):
                     timer.cancel()
                 button_name = self._build_button_name(botao, long_press=True)
                 if is_second_click:
-                    state["repeat_active"] = True
+                    with self._lock:
+                        state["repeat_active"] = True
                     self._repeat_timer(botao)
                 else:
                     self.executa_acao(button_name, state=1)
@@ -134,12 +137,29 @@ class GenericVRBoxPointer(BasePointerDevice):
             click_timer.start()
             self._pending_click_timers[botao] = click_timer
 
+    # def _repeat_timer(self, botao):
+    #     state = self._button_states.get(botao)
+    #     if state and state["repeat_active"]:
+    #         button = self._build_button_name(botao, repeat=True)
+    #         self.executa_acao(button, state=1)
+    #         t = threading.Timer(self.REPEAT_INTERVAL, self._repeat_timer, args=(botao,))
+    #         state["repeat_timer"] = t
+    #         t.start()
+
     def _repeat_timer(self, botao):
-        state = self._button_states.get(botao)
-        if state and state["repeat_active"]:
+        with self._lock:
+            state = self._button_states.get(botao)
+            if not state or not state.get("repeat_active"):
+                return
             button = self._build_button_name(botao, repeat=True)
-            self.executa_acao(button, state=1)
-            t = threading.Timer(self.REPEAT_INTERVAL, self._repeat_timer, args=(botao,))
+        self.executa_acao(button, state=1)
+        # Reagenda fora do lock para evitar deadlock
+        t = threading.Timer(self.REPEAT_INTERVAL, self._repeat_timer, args=(botao,))
+        with self._lock:
+            # Verifica novamente antes de armazenar/agendar
+            state = self._button_states.get(botao)
+            if not state or not state.get("repeat_active"):
+                return
             state["repeat_timer"] = t
             t.start()
 
@@ -154,8 +174,10 @@ class GenericVRBoxPointer(BasePointerDevice):
 
         if "long_timer" in state:
             state["long_timer"].cancel()
-        if "repeat_timer" in state:
-            state["repeat_timer"].cancel()
+
+        with self._lock:
+            if "repeat_timer" in state:
+                state["repeat_timer"].cancel()
 
         # Libera combo
         for k in list(self._button_states):
