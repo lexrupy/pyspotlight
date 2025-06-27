@@ -18,35 +18,6 @@ class BaseusOrangeDotAI(BasePointerDevice):
         self.last_click_time_113 = 0
         self.double_click_interval = 0.3  # segundos para considerar duplo clique
 
-    # def start_event_blocking(self):
-    #     if not self._event_thread or not self._event_thread.is_alive():
-    #         devs = self.find_all_event_devices_for_known()
-    #         if devs:
-    #             self._event_thread = threading.Thread(
-    #                 target=self.read_input_events,
-    #                 args=(devs,),
-    #                 daemon=True,
-    #             )
-    #             self._event_thread.start()
-    #         else:
-    #             self._ctx.log(
-    #                 "* Nenhum dispositivo de entrada conhecido encontrado para bloquear."
-    #             )
-
-    # @classmethod
-    # def is_known_device(cls, device_info):
-    #     try:
-    #         output = subprocess.check_output(
-    #             ["udevadm", "info", "-a", "-n", device_info], text=True
-    #         ).lower()
-    #         vid = f"{cls.VENDOR_ID:04x}"
-    #         pid = f"{cls.PRODUCT_ID:04x}"
-    #         if vid in output and pid in output:
-    #             return True
-    #         return False
-    #     except subprocess.CalledProcessError:
-    #         return False
-
     def monitor(self):
         super().monitor()
         self.start_hidraw_monitoring()
