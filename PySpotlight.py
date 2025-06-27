@@ -106,7 +106,7 @@ class PySpotlightApp(QMainWindow):
         main_layout.addLayout(monitor_layout)
 
         self.device_combo = QComboBox()
-        self.device_combo_label = QLabel("Dispositivos Monitorados:")
+        self.device_combo_label = QLabel("Dispositivos compatíveis:")
         self.device_combo_label.setAlignment(Qt.AlignLeft)
 
         main_layout.addWidget(self.device_combo_label)
@@ -300,6 +300,7 @@ class PySpotlightApp(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setApplicationName("PySpotlight")
     window = PySpotlightApp()
     window.show()
     sys.exit(app.exec_())
