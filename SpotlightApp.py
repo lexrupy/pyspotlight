@@ -11,8 +11,9 @@ from PyQt5.QtWidgets import (
     QWidget,
     QComboBox,
 )
-from PyQt5.QtGui import QGuiApplication
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QGuiApplication, QFontMetrics
+
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QRect, QPoint, QMetaObject
 from screeninfo import get_monitors
 from PIL import Image, ImageDraw
 from pystray import Icon, Menu, MenuItem
@@ -20,7 +21,7 @@ from pyspotlight.appcontext import AppContext
 from pyspotlight.devices import DeviceMonitor
 from pyspotlight.spotlight import SpotlightOverlayWindow
 from pyspotlight.settingswindow import SpotlightSettingsWindow
-from pyspotlight.infoverlay import InfOverlayWindow, InfOverlayController
+from pyspotlight.infoverlay import InfOverlayWindow
 from pyspotlight.utils import capture_monitor_screenshot
 
 import faulthandler
@@ -30,6 +31,7 @@ faulthandler.enable()
 
 class PySpotlightApp(QMainWindow):
     log_signal = pyqtSignal(str)
+    info_signal = pyqtSignal(str)
     refresh_devices_signal = pyqtSignal()
 
     def __init__(self):
@@ -40,18 +42,18 @@ class PySpotlightApp(QMainWindow):
         self.running = True
         self.icon = None
         self.log_signal.connect(self.append_log)
+        self.info_signal.connect(self.show_info)
 
         self.ctx = AppContext(
             selected_screen=0,
             log_function=self.thread_safe_log,
-            show_info_function=self.mostrar_info_em_monitor_secundario,
+            show_info_function=self.thread_save_info,
         )
         self.create_overlay()
         # self.spotlight_window = SpotlightOverlayWindow(self.ctx)
         self.device_monitor = DeviceMonitor(self.ctx)
 
         self.info_overlay = None
-        self.info_controller = None
         if len(QGuiApplication.screens()) >= 1:
             self.setup_info_overlay()
 
@@ -159,11 +161,21 @@ class PySpotlightApp(QMainWindow):
             target_index = 1 if self.ctx.selected_screen == 0 else 0
         geometry = all_screens[target_index].geometry()
         self.info_overlay = InfOverlayWindow(geometry)
-        self.info_controller = InfOverlayController(self.info_overlay)
 
-    def mostrar_info_em_monitor_secundario(self, mensagem):
-        if self.info_controller:
-            self.info_controller.show_message(mensagem)
+    def show_info(self, mensagem):
+        # if self.info_overlay:
+        #     self.info_overlay.show_message(mensagem)
+        #     QTimer.singleShot(2000, self.info_overlay.hide)
+        if self.info_overlay:
+            self.info_overlay.show_message(mensagem)
+
+            if hasattr(self, "_info_timer") and self._info_timer:
+                self._info_timer.stop()
+
+            self._info_timer = QTimer(self)
+            self._info_timer.setSingleShot(True)
+            self._info_timer.timeout.connect(self.info_overlay.hide)
+            self._info_timer.start(1000)
 
     def clear_log(self):
         self.log_text.clear()
@@ -177,6 +189,9 @@ class PySpotlightApp(QMainWindow):
 
     def thread_safe_log(self, message):
         self.log_signal.emit(message)
+
+    def thread_save_info(self, message):
+        self.info_signal.emit(message)
 
     def refresh_screens(self):
         current_index = self.screen_combo.currentIndex()

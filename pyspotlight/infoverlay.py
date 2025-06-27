@@ -29,7 +29,7 @@ class InfOverlayWindow(QWidget):
         self.font = QFont("Arial", 64, QFont.Bold)
         self.label.setFont(self.font)
 
-    def show_message(self, text, duration_ms=2000):
+    def show_message(self, text):
         self.label.setText(text)
 
         # Calcula o tamanho da janela com base no texto
@@ -53,9 +53,7 @@ class InfOverlayWindow(QWidget):
         self.setGeometry(QRect(top_left, self.size()))
         self.resize(window_width, window_height)
         self.label.resize(window_width, window_height)
-
         self.show()
-        QTimer.singleShot(duration_ms, self.hide)
 
     def paintEvent(self, event):
         # Desenha fundo preto translúcido
@@ -66,13 +64,13 @@ class InfOverlayWindow(QWidget):
         painter.drawRoundedRect(self.rect(), 20, 20)
 
 
-class InfOverlayController(QObject):
-    show_requested = pyqtSignal(str, int)
-
-    def __init__(self, overlay: InfOverlayWindow):
-        super().__init__()
-        self.overlay = overlay
-        self.show_requested.connect(self.overlay.show_message)
-
-    def show_message(self, text, duration=2000):
-        self.show_requested.emit(text, duration)
+# class InfOverlayController(QObject):
+#     show_requested = pyqtSignal(str, int)
+#
+#     def __init__(self, overlay: InfOverlayWindow):
+#         super().__init__()
+#         self.overlay = overlay
+#         self.show_requested.connect(self.overlay.show_message)
+#
+#     def show_message(self, text, duration=2000):
+#         self.show_requested.emit(text, duration)
