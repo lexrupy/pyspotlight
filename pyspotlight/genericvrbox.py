@@ -26,6 +26,7 @@ class GenericVRBoxPointer(BasePointerDevice):
     LONG_PRESS_INTERVAL = 0.6  # tempo mínimo para considerar pressionamento longo
     DOUBLE_CLICK_INTERVAL = 0.4  # segundos
     COMBO_WINDOW = 0.3
+    REPEAT_INTERVAL = 0.05
 
     def __init__(self, app_ctx, hidraw_path):
         super().__init__(app_ctx=app_ctx, hidraw_path=hidraw_path)
@@ -147,7 +148,7 @@ class GenericVRBoxPointer(BasePointerDevice):
         if state and state["repeat_active"]:
             button = self._build_button_name(botao, repeat=True)
             self.executa_acao(button, state=1)
-            t = threading.Timer(0.1, self._repeat_timer, args=(botao,))
+            t = threading.Timer(self.REPEAT_INTERVAL, self._repeat_timer, args=(botao,))
             state["repeat_timer"] = t
             t.start()
 
@@ -232,6 +233,8 @@ class GenericVRBoxPointer(BasePointerDevice):
             case "G1":
                 if current_mode == MODE_MOUSE:
                     self.emit_key_press(self._ctx.ui, uinput.KEY_PAGEDOWN)
+                elif current_mode in [MODE_LASER]:
+                    ow.next_color()
             case "G1++":
                 if current_mode in [MODE_LASER]:
                     ow.next_color()
@@ -240,9 +243,14 @@ class GenericVRBoxPointer(BasePointerDevice):
             case "G1+repeat":
                 if current_mode == MODE_SPOTLIGHT:
                     ow.change_spot_radius(+1)
+                elif current_mode == MODE_LASER:
+                    ow.change_laser_size(+1)
             case "G2":
                 if current_mode == MODE_MOUSE:
                     self.emit_key_press(self._ctx.ui, uinput.KEY_PAGEUP)
+
+                elif current_mode in [MODE_LASER]:
+                    ow.next_color(-1)
             case "G2++":
                 if current_mode in [MODE_LASER]:
                     ow.next_color()
@@ -254,6 +262,8 @@ class GenericVRBoxPointer(BasePointerDevice):
             case "G2+repeat":
                 if current_mode == MODE_SPOTLIGHT:
                     ow.change_spot_radius(-1)
+                elif current_mode == MODE_LASER:
+                    ow.change_laser_size(-1)
             case "A":
                 pass
             case "A++":

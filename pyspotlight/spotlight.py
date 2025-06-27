@@ -1,7 +1,5 @@
 import os
-import sys
 import time
-import threading
 import configparser
 from PyQt5.QtWidgets import QApplication, QWidget
 from PyQt5.QtGui import (
@@ -10,7 +8,6 @@ from PyQt5.QtGui import (
     QPixmap,
     QCursor,
     QPainterPath,
-    QGuiApplication,
     QPen,
     QBrush,
 )
@@ -72,6 +69,8 @@ class SpotlightOverlayWindow(QWidget):
             QColor(0, 255, 255),  # Ciano
             QColor(255, 165, 0),  # Laranja forte
             QColor(255, 255, 255),  # Branco
+            QColor(0, 0, 0),  # Preto
+            QColor(0, 0, 0, 0),  # Preto
         ]
         self.laser_index = 0
         self.laser_size = 10
@@ -220,6 +219,20 @@ class SpotlightOverlayWindow(QWidget):
         self._ctx.log(f"Modo atual: {MODE_MAP[self.mode]}")
         self._ctx.show_info(MODE_MAP[self.mode])
 
+    def change_laser_size(self, delta: int):
+        min_size = 5
+        max_size = 100
+
+        new_size = self.laser_size + delta
+        if new_size < min_size:
+            new_size = min_size
+        elif new_size > max_size:
+            new_size = max_size
+
+        if new_size != self.laser_size:
+            self.laser_size = new_size
+            self.update()
+
     def change_spot_radius(self, increase=1):
         if increase == 0:
             self.spot_radius = self.default_spot_radius
@@ -241,7 +254,9 @@ class SpotlightOverlayWindow(QWidget):
         self.pen_color = self.laser_colors[self.laser_index]
         self.update()
 
-    def clear_drawing(self):
+    def clear_drawing(self, all=False):
+        if all:
+            self.pen_paths.clear()
         if self.pen_paths:
             self.pen_paths.pop()  # Remove o último caminho desenhado
         self.current_path = []
@@ -323,28 +338,70 @@ class SpotlightOverlayWindow(QWidget):
             painter.drawPath(spotlight_path)
 
     def drawLaser(self, painter, cursor_pos):
+        size = self.laser_size
+        half_size = size // 2
         # Laser pointer com sombras e círculo central
         color = self.laser_colors[self.laser_index]
-        size = self.laser_size
-        center_x = cursor_pos.x() - size // 2
-        center_y = cursor_pos.y() - size // 2
 
-        shadow_levels = [(12, 30), (8, 60), (4, 90)]
-        for margin, alpha in shadow_levels:
-            shadow_color = QColor(color)
-            shadow_color.setAlpha(alpha)
-            painter.setBrush(shadow_color)
-            painter.setPen(Qt.NoPen)
-            painter.drawEllipse(
-                center_x - margin,
-                center_y - margin,
-                size + 2 * margin,
-                size + 2 * margin,
+        if color == self.laser_colors[-1]:
+            laser_rect = QRect(
+                cursor_pos.x() - half_size, cursor_pos.y() - half_size, size, size
             )
+            region = self.pixmap.copy(laser_rect)
+            image = region.toImage()
+            image.invertPixels()
+            inverted_pixmap = QPixmap.fromImage(image)
 
-        painter.setBrush(color)
-        painter.setPen(Qt.NoPen)
-        painter.drawEllipse(center_x, center_y, size, size)
+            # Clipa o círculo para desenhar só o laser invertido dentro dele
+            clip_path = QPainterPath()
+            clip_path.addEllipse(cursor_pos, half_size, half_size)
+            painter.setClipPath(clip_path)
+            painter.drawPixmap(laser_rect, inverted_pixmap)
+            painter.setClipping(False)
+
+            # Agora desenha as sombras ao redor, mas **fora** do círculo
+            for margin, alpha in [(12, 50), (8, 80), (4, 110)]:
+                outer_radius = half_size + margin
+                outer_path = QPainterPath()
+                outer_path.addEllipse(cursor_pos, outer_radius, outer_radius)
+
+                # subtrai o círculo central
+                outer_path -= clip_path
+
+                shadow_color = QColor(255, 255, 255, alpha)
+                painter.setBrush(shadow_color)
+                painter.setPen(Qt.NoPen)
+                painter.drawPath(outer_path)
+
+            # borda branca (opcional)
+            pen = QPen(QColor(255, 255, 255, 200))
+            pen.setWidth(2)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.drawEllipse(cursor_pos, half_size, half_size)
+
+        else:
+
+            center_x = cursor_pos.x() - size // 2
+            center_y = cursor_pos.y() - size // 2
+
+            shadow_levels = [(12, 30), (8, 60), (4, 90)]
+            for margin, alpha in shadow_levels:
+                shadow_color = QColor(color)
+                shadow_color.setAlpha(alpha)
+                painter.setBrush(shadow_color)
+                painter.setPen(Qt.NoPen)
+                painter.drawEllipse(
+                    center_x - margin,
+                    center_y - margin,
+                    size + 2 * margin,
+                    size + 2 * margin,
+                )
+
+            painter.setBrush(color)
+            painter.setPen(Qt.NoPen)
+            painter.drawEllipse(center_x, center_y, size, size)
 
     def drawLines(self, painter, cursor_pos):
         painter.setRenderHint(QPainter.Antialiasing)
@@ -514,21 +571,3 @@ class SpotlightOverlayWindow(QWidget):
     def quit(self):
         self.save_config()
         self.set_mouse_mode()
-
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-
-    screen_index = int(sys.argv[1]) if len(sys.argv) > 1 else 0
-
-    screens = QGuiApplication.screens()
-
-    geometry = screens[screen_index].geometry()
-
-    img, geometry = capture_monitor_screenshot(screen_index)
-    w = OverlayWindow(img, geometry, screen_index)
-
-    threading.Thread(target=ipc_listener, args=(w,), daemon=True).start()
-
-    sys.exit(app.exec_())
-    # END
