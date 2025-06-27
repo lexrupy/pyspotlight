@@ -1,10 +1,8 @@
 import time
 import uinput
-import subprocess
-import glob
-import evdev
 import threading
-import select
+import os
+import evdev.ecodes as ec
 
 from pyspotlight.utils import MODE_LASER, MODE_MOUSE, MODE_PEN, MODE_SPOTLIGHT
 from .pointerdevice import BasePointerDevice
@@ -19,78 +17,71 @@ class BaseusOrangeDotAI(BasePointerDevice):
         super().__init__(app_ctx=app_ctx, hidraw_path=hidraw_path)
         self.last_click_time_113 = 0
         self.double_click_interval = 0.3  # segundos para considerar duplo clique
-        self._event_thread = None
-        self.start_event_blocking()
-        self.add_known_path(hidraw_path)
-        for device in self.find_all_event_devices_for_known():
-            self.add_known_path(device.path)
 
-    def start_event_blocking(self):
-        if not self._event_thread or not self._event_thread.is_alive():
-            devs = self.find_all_event_devices_for_known()
-            if devs:
-                self._event_thread = threading.Thread(
-                    target=self.prevent_key_and_mouse_events,
-                    args=(devs,),
-                    daemon=True,
-                )
-                self._event_thread.start()
-            else:
-                self._ctx.log(
-                    "* Nenhum dispositivo de entrada conhecido encontrado para bloquear."
-                )
+    # def start_event_blocking(self):
+    #     if not self._event_thread or not self._event_thread.is_alive():
+    #         devs = self.find_all_event_devices_for_known()
+    #         if devs:
+    #             self._event_thread = threading.Thread(
+    #                 target=self.read_input_events,
+    #                 args=(devs,),
+    #                 daemon=True,
+    #             )
+    #             self._event_thread.start()
+    #         else:
+    #             self._ctx.log(
+    #                 "* Nenhum dispositivo de entrada conhecido encontrado para bloquear."
+    #             )
 
-    def find_all_event_devices_for_known(self):
-        devices = []
-        for path in glob.glob("/dev/input/event*"):
-            if self.__class__.is_known_device(path):
-                try:
-                    devices.append(evdev.InputDevice(path))
-                    self._ctx.log(f"* Encontrado device de entrada: {path}")
-                except Exception as e:
-                    self._ctx.log(f"* Erro ao acessar {path}: {e}")
-        return devices
-
-    @classmethod
-    def is_known_device(cls, device_info):
-        try:
-            output = subprocess.check_output(
-                ["udevadm", "info", "-a", "-n", device_info], text=True
-            ).lower()
-            vid = f"{cls.VENDOR_ID:04x}"
-            pid = f"{cls.PRODUCT_ID:04x}"
-            if vid in output and pid in output:
-                return True
-            return False
-        except subprocess.CalledProcessError:
-            return False
+    # @classmethod
+    # def is_known_device(cls, device_info):
+    #     try:
+    #         output = subprocess.check_output(
+    #             ["udevadm", "info", "-a", "-n", device_info], text=True
+    #         ).lower()
+    #         vid = f"{cls.VENDOR_ID:04x}"
+    #         pid = f"{cls.PRODUCT_ID:04x}"
+    #         if vid in output and pid in output:
+    #             return True
+    #         return False
+    #     except subprocess.CalledProcessError:
+    #         return False
 
     def monitor(self):
-        try:
-            with open(self.path, "rb") as f:
-                for pacote in self.read_pacotes_completos(f):
-                    self.processa_pacote_hid(pacote)
-        except PermissionError:
-            self._ctx.log(
-                f"* Sem permissão para acessar {self.path} (tente ajustar udev ou rodar com sudo)"
-            )
-        except KeyboardInterrupt:
-            self._ctx.log(f"\nFinalizando monitoramento de {self.path}")
-        except OSError as e:
-            if e.errno == 5:  # Input/output error
-                self._ctx.log("- Dispositivo desconectado ou erro de I/O")
-            else:
-                self._ctx.log(f"* Erro em {self.path}: {e}")
+        super().monitor()
+        self.start_hidraw_monitoring()
 
-        except Exception as e:
-            self._ctx.log(f"*  Erro em {self.path}: {e}")
+    def start_hidraw_monitoring(self):
+        def run():
+            try:
+                if os.path.exists(self.path):
+                    with open(self.path, "rb") as f:
+                        for pacote in self.read_pacotes_completos(f):
+                            self.processa_pacote_hid(pacote)
+            except PermissionError:
+                self._ctx.log(
+                    f"* Sem permissão para acessar {self.path} (tente ajustar udev ou rodar com sudo)"
+                )
+            except KeyboardInterrupt:
+                self._ctx.log(f"\nFinalizando monitoramento de {self.path}")
+            except OSError as e:
+                if e.errno == 5:  # Input/output error
+                    self._ctx.log("- Dispositivo desconectado ou erro de I/O")
+                else:
+                    self._ctx.log(f"* Erro em {self.path}: {e}")
+
+            except Exception as e:
+                self._ctx.log(f"*  Erro em {self.path}: {e}")
+
+        threading.Thread(target=run, daemon=True).start()
 
     def read_pacotes_completos(self, f):
+        buffer = bytearray()
         try:
-            buffer = bytearray()
-            while True:
+            while not self._stop_event.is_set():
                 b = f.read(1)
                 if not b:
+                    time.sleep(0.01)
                     break
                 buffer += b
                 if b[0] == 182:
@@ -104,6 +95,8 @@ class BaseusOrangeDotAI(BasePointerDevice):
             self._ctx.log(f"[ERRO] Exceção inesperada: {e}")
 
     def processa_pacote_hid(self, data):
+
+        self._ctx.log(f"{list(data)}")
         if not (
             isinstance(data, bytes)
             and len(data) == 16
@@ -192,69 +185,47 @@ class BaseusOrangeDotAI(BasePointerDevice):
                 if current_mode == MODE_SPOTLIGHT:
                     ow.adjust_overlay_color(0, -10)
 
-    def prevent_key_and_mouse_events(self, devices):
-        fd_para_dev = {}
-        for dev in devices:
-            try:
-                dev.grab()
-                fd_para_dev[dev.fd] = dev
-                self._ctx.log(f"* Monitorado: {dev.path}")
-            except Exception as e:
-                self._ctx.log(
-                    f"* Erro ao monitorar dispositivo {dev.path}: {e}. Tente executar como root ou ajuste as regras udev."
-                )
+    def handle_event(self, event):
 
-        if not fd_para_dev:
-            self._ctx.log("* Nenhum dispositivo monitorado para bloquear eventos.")
-            return
-
-        self._ctx.log("* Monitorando dispositivos...")
-
-        try:
-            while True:
-                r, _, _ = select.select(fd_para_dev.keys(), [], [])
-                for fd in r:
-                    dev = fd_para_dev.get(fd)
-                    if dev is None:
-                        continue
-                    try:
-                        for event in dev.read():
-                            if event.type == evdev.ecodes.EV_REL or (
-                                event.type == evdev.ecodes.EV_KEY
-                                and event.code
-                                in (
-                                    evdev.ecodes.BTN_LEFT,
-                                    evdev.ecodes.BTN_RIGHT,
-                                )
-                            ):
-                                # Repassa evento virtual com cuidado
-                                self._ctx.ui.emit((event.type, event.code), event.value)
-
-                    except OSError as e:
-                        if e.errno == 19:  # No such device
-                            self._ctx.log(f"- Dispositivo desconectado: {dev.path}")
-                            # Remove dispositivo da lista para não monitorar mais
-                            fd_para_dev.pop(fd, None)
-                            try:
-                                dev.ungrab()
-                            except Exception:
-                                pass
-                            if not fd_para_dev:
-                                self._ctx.log(
-                                    "* Nenhum dispositivo restante para monitorar. Encerrando thread."
-                                )
-                                return
-                        else:
-                            self._ctx.log(f"* Erro de OSError na leitura: {e}")
-                            # Opcional: continue ou re-raise, cuidado com segfaults
-                    except Exception as e:
-                        self._ctx.log(f"* Exceção inesperada: {e}")
-                        # Não re-raise para evitar segfaults inesperados
-        except KeyboardInterrupt:
-            self._ctx.log("\n* Encerrando monitoramento.")
-        finally:
-            for dev in devices:
-                try:
-                    dev.ungrab()
-                except Exception:
-                    pass
+        # if event.type == ec.EV_REL:  # Movimento de Mouse
+        #     # Repassa evento virtual
+        #     self._ctx.ui.emit((event.type, event.code), event.value)
+        #
+        # elif event.type == ec.EV_KEY:
+        #     botao = None
+        #     all_keys = ec.KEY | ec.BTN
+        #     self._ctx.log(f"{all_keys[event.code]} - {event.value}")
+        #     match event.code:
+        #         case ec.BTN_LEFT | ec.BTN_TL:
+        #             botao = "G1"
+        #         case ec.BTN_RIGHT | ec.BTN_TR:
+        #             botao = "G2"
+        #         case ec.BTN_A | ec.KEY_PLAYPAUSE | ec.BTN_TR2:
+        #             botao = "A"
+        #         case ec.BTN_B | ec.BTN_X:
+        #             botao = "B"
+        #         case ec.KEY_VOLUMEUP | ec.BTN_TL2:
+        #             botao = "C"
+        #         case ec.KEY_VOLUMEDOWN | ec.BTN_Y:
+        #             botao = "D"
+        #         case ec.KEY_NEXTSONG:
+        #             botao = "SL"
+        #         case ec.KEY_PREVIOUSSONG:
+        #             botao = "SR"
+        #
+        #     if event.value == 1:
+        #         pass
+        #         # self._on_button_press(botao)
+        #     elif event.value == 0:
+        #         pass
+        # self._on_button_release(botao)
+        if event.type == ec.EV_REL or (
+            event.type == ec.EV_KEY
+            and event.code
+            in (
+                ec.BTN_LEFT,
+                ec.BTN_RIGHT,
+            )
+        ):
+            # Repassa evento virtual com cuidado
+            self._ctx.ui.emit((event.type, event.code), event.value)

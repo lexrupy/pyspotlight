@@ -145,22 +145,12 @@ class PySpotlightApp(QMainWindow):
             self.device_combo.addItem(label, userData=dev)
 
     def create_overlay(self):
-
-        # Fecha janela anterior se existir
-        # if self.ctx.overlay_window:
-        #     self.ctx.overlay_window.close()
-        #     self.ctx.overlay_window.deleteLater()
-        #     self.ctx.overlay_window = None
         screen_index = self.ctx.selected_screen
-        screens = QGuiApplication.screens()
-        # geometry = screens[screen_index].geometry()
         screenshot, geometry = capture_monitor_screenshot(screen_index)
-
         # Fecha janela anterior se existir
         if self.ctx.overlay_window:
             self.ctx.overlay_window.monitor_index = screen_index
             self.ctx.overlay_window.setGeometry(geometry)
-            # self.ctx.overlay_window.close()
         else:
             self.ctx.overlay_window = SpotlightOverlayWindow(
                 context=self.ctx,
@@ -168,15 +158,8 @@ class PySpotlightApp(QMainWindow):
                 screen_geometry=geometry,
                 monitor_index=screen_index,
             )
-        # self.ctx.overlay_window.showFullScreen()
 
     def setup_info_overlay(self):
-        # Fecha janela anterior se existir
-        # if self.info_overlay:
-        #     self.info_overlay.close()
-        #     self.info_overlay.deleteLater()
-        #     self.info_overlay = None
-
         # Pega o monitor que não está sendo usado pelo spotlight
         all_screens = QGuiApplication.screens()
         target_index = 0
@@ -188,9 +171,6 @@ class PySpotlightApp(QMainWindow):
         self.info_overlay = InfOverlayWindow(geometry)
 
     def show_info(self, mensagem):
-        # if self.info_overlay:
-        #     self.info_overlay.show_message(mensagem)
-        #     QTimer.singleShot(2000, self.info_overlay.hide)
         if self.info_overlay:
             self.info_overlay.show_message(mensagem)
 

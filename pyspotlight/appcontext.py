@@ -15,6 +15,8 @@ class AppContext:
         self._show_info_function = show_info_function
         self._compatible_modes = []
 
+        self._active_device = None
+
         self._ui = uinput.Device(
             [
                 uinput.REL_X,
@@ -90,6 +92,19 @@ class AppContext:
     @show_info_function.setter
     def show_info_function(self, func):
         self._show_info_function = func
+
+    def set_active_device(self, device):
+        if self._active_device == device:
+            return
+
+        # Para dispositivo ativo anterior
+        if self._active_device:
+            self._active_device.stop()
+
+        self._active_device = device
+
+        if device:
+            device.ensure_monitoring()
 
     def log(self, message):
         if self._log_function:

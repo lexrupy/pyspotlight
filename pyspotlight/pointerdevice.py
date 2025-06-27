@@ -1,4 +1,9 @@
 import os
+import threading
+import subprocess
+import select
+import glob
+import evdev
 
 
 class SingletonMeta(type):
@@ -15,12 +20,53 @@ class SingletonMeta(type):
 class BasePointerDevice(metaclass=SingletonMeta):
     def __init__(self, app_ctx, hidraw_path):
         self.path = hidraw_path
+
+        self._stop_event = threading.Event()
+        self._event_thread = None
         self._ctx = app_ctx
         self._device_name = None
         self._known_paths = []
 
+        self.add_known_path(hidraw_path)
+        for device in self.find_all_event_devices_for_known():
+            self.add_known_path(device.path)
+
+    def start_event_blocking(self):
+        if not self._event_thread or not self._event_thread.is_alive():
+            self._stop_event.clear()
+            devs = self.find_all_event_devices_for_known()
+            if devs:
+                self._event_thread = threading.Thread(
+                    target=self.read_input_events,
+                    args=(devs,),
+                    daemon=True,
+                )
+                self._event_thread.start()
+            else:
+                self._ctx.log(
+                    "* Nenhum dispositivo de entrada conhecido encontrado para bloquear."
+                )
+
+    def find_all_event_devices_for_known(self):
+        devices = []
+        for path in glob.glob("/dev/input/event*"):
+            if self.__class__.is_known_device(path):
+                try:
+                    devices.append(evdev.InputDevice(path))
+                    self._ctx.log(f"* Encontrado device de entrada: {path}")
+                except Exception as e:
+                    self._ctx.log(f"* Erro ao acessar {path}: {e}")
+        return devices
+
     def monitor(self):
-        raise NotImplementedError
+        self.start_event_blocking()
+
+    def stop(self):
+        if self._event_thread and self._event_thread.is_alive():
+            self._stop_event.set()
+            self._event_thread.join(
+                timeout=1
+            )  # espera a thread encerrar (timeout opcional)
 
     def ensure_monitoring(self):
         if (
@@ -87,7 +133,15 @@ class BasePointerDevice(metaclass=SingletonMeta):
 
     @classmethod
     def is_known_device(cls, device_info):
-        raise NotImplementedError
+        try:
+            output = subprocess.check_output(
+                ["udevadm", "info", "-a", "-n", device_info], text=True
+            ).lower()
+            vid = f"{cls.VENDOR_ID:04x}"
+            pid = f"{cls.PRODUCT_ID:04x}"
+            return vid in output and pid in output
+        except subprocess.CalledProcessError:
+            return False
 
     def emit_key_press(self, ui, key):
         ui.emit(key, 1)  # Pressiona
@@ -98,3 +152,58 @@ class BasePointerDevice(metaclass=SingletonMeta):
         ui.emit(keys[1], 1)  # Pressiona segunda tecla ex: F5
         ui.emit(keys[1], 0)  # Solta segunda tecla
         ui.emit(keys[0], 0)  # Solta primeira tecla
+
+    def handle_event(self, event):
+        pass
+
+    def read_input_events(self, devices):
+        while not self._stop_event.is_set():
+            fd_para_dev = {}
+            for dev in devices:
+                try:
+                    dev.grab()
+                    fd_para_dev[dev.fd] = dev
+                    self._ctx.log(f"* Monitorado: {dev.path}")
+                except Exception as e:
+                    self._ctx.log(
+                        f"* Erro ao monitorar dispositivo {dev.path}: {e}. Tente executar como root ou ajuste as regras udev."
+                    )
+            self._ctx.log("* Monitorando dispositivos...")
+
+            try:
+                while True:
+                    r, _, _ = select.select(fd_para_dev, [], [], 0.1)
+                    for fd in r:
+                        dev = fd_para_dev.get(fd)
+                        if dev is None:
+                            continue
+                        try:
+                            for event in dev.read():
+                                self.handle_event(event)
+
+                        except OSError as e:
+                            if e.errno == 19:  # No such device
+                                self._ctx.log(f"- Dispositivo desconectado: {dev.path}")
+                                # Remove dispositivo da lista para não monitorar mais
+                                fd_para_dev.pop(fd, None)
+                                try:
+                                    dev.ungrab()
+                                except Exception:
+                                    pass
+                                # Opcional: se não há mais dispositivos, pode encerrar ou esperar
+                                if not fd_para_dev:
+                                    self._ctx.log(
+                                        "* Nenhum dispositivo restante para monitorar. Encerrando thread."
+                                    )
+                                    return
+                            else:
+                                raise
+
+            except KeyboardInterrupt:
+                self._ctx.log("\n* Encerrando monitoramento.")
+            finally:
+                for dev in devices:
+                    try:
+                        dev.ungrab()
+                    except Exception:
+                        pass

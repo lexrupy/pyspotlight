@@ -1,11 +1,7 @@
 import time
 import uinput
-import subprocess
-import glob
-import evdev
 import evdev.ecodes as ec
 import threading
-import select
 
 from pyspotlight.utils import MODE_LASER, MODE_MOUSE, MODE_PEN, MODE_SPOTLIGHT
 from .pointerdevice import BasePointerDevice
@@ -30,17 +26,12 @@ class GenericVRBoxPointer(BasePointerDevice):
 
     def __init__(self, app_ctx, hidraw_path):
         super().__init__(app_ctx=app_ctx, hidraw_path=hidraw_path)
-        self._event_thread = None
         # botao: {start_time, long_timer, repeat_timer, long_pressed}
         self._button_states = {}
         self._last_click_time = {}
         self._last_release_time = {}
         self._pending_click_timers = {}  # botao: threading.Timer
         self._ctx.compatible_modes = [MODE_MOUSE, MODE_SPOTLIGHT, MODE_LASER]
-
-        self.add_known_path(hidraw_path)
-        for device in self.find_all_event_devices_for_known():
-            self.add_known_path(device.path)
 
     def _build_button_name(self, button, long_press=False, repeat=False):
         parts = [button]
@@ -191,38 +182,8 @@ class GenericVRBoxPointer(BasePointerDevice):
         if state["long_pressed"] or state["repeat_active"]:
             return
 
-        # if not state["long_pressed"] and not state["repeat_active"]:
-        #     if duration >= 0.02:  # evita ruído de toque acidental
-        #         self.executa_acao(botao, state=1)
-
-    def start_event_blocking(self):
-        if not self._event_thread or not self._event_thread.is_alive():
-            devs = self.find_all_event_devices_for_known()
-            if devs:
-                self._event_thread = threading.Thread(
-                    target=self.read_input_events,
-                    args=(devs,),
-                    daemon=True,
-                )
-                self._event_thread.start()
-            else:
-                self._ctx.log(
-                    "* Nenhum dispositivo de entrada conhecido encontrado para bloquear."
-                )
-
     def monitor(self):
         self.start_event_blocking()
-
-    def find_all_event_devices_for_known(self):
-        devices = []
-        for path in glob.glob("/dev/input/event*"):
-            if self.__class__.is_known_device(path):
-                try:
-                    devices.append(evdev.InputDevice(path))
-                    self._ctx.log(f"* Encontrado device de entrada: {path}")
-                except Exception as e:
-                    self._ctx.log(f"* Erro ao acessar {path}: {e}")
-        return devices
 
     def executa_acao(self, botao, state):
         ow = self._ctx.overlay_window
@@ -296,93 +257,33 @@ class GenericVRBoxPointer(BasePointerDevice):
             case "D+repeat":
                 pass
 
-    @classmethod
-    def is_known_device(cls, device_info):
-        try:
-            output = subprocess.check_output(
-                ["udevadm", "info", "-a", "-n", device_info], text=True
-            ).lower()
-            vid = f"{cls.VENDOR_ID:04x}"
-            pid = f"{cls.PRODUCT_ID:04x}"
-            return vid in output and pid in output
-        except subprocess.CalledProcessError:
-            return False
+    def handle_event(self, event):
+        if event.type == ec.EV_REL:  # Movimento de Mouse
+            # Repassa evento virtual
+            self._ctx.ui.emit((event.type, event.code), event.value)
 
-    def read_input_events(self, devices):
-        fd_para_dev = {}
-        for dev in devices:
-            try:
-                dev.grab()
-                fd_para_dev[dev.fd] = dev
-                self._ctx.log(f"* Monitorado: {dev.path}")
-            except Exception as e:
-                self._ctx.log(
-                    f"* Erro ao monitorar dispositivo {dev.path}: {e}. Tente executar como root ou ajuste as regras udev."
-                )
-        self._ctx.log("* Monitorando dispositivos...")
+        elif event.type == ec.EV_KEY:
+            botao = None
+            all_keys = ec.KEY | ec.BTN
+            match event.code:
+                case ec.BTN_LEFT | ec.BTN_TL:
+                    botao = "G1"
+                case ec.BTN_RIGHT | ec.BTN_TR:
+                    botao = "G2"
+                case ec.BTN_A | ec.KEY_PLAYPAUSE | ec.BTN_TR2:
+                    botao = "A"
+                case ec.BTN_B | ec.BTN_X:
+                    botao = "B"
+                case ec.KEY_VOLUMEUP | ec.BTN_TL2:
+                    botao = "C"
+                case ec.KEY_VOLUMEDOWN | ec.BTN_Y:
+                    botao = "D"
+                case ec.KEY_NEXTSONG:
+                    botao = "SL"
+                case ec.KEY_PREVIOUSSONG:
+                    botao = "SR"
 
-        try:
-            while True:
-                r, _, _ = select.select(fd_para_dev, [], [])
-                for fd in r:
-                    dev = fd_para_dev.get(fd)
-                    if dev is None:
-                        continue
-                    try:
-                        for event in dev.read():
-                            if event.type == ec.EV_REL:  # Movimento de Mouse
-                                # Repassa evento virtual
-                                self._ctx.ui.emit((event.type, event.code), event.value)
-
-                            elif event.type == ec.EV_KEY:
-                                botao = None
-                                all_keys = ec.KEY | ec.BTN
-                                match event.code:
-                                    case ec.BTN_LEFT | ec.BTN_TL:
-                                        botao = "G1"
-                                    case ec.BTN_RIGHT | ec.BTN_TR:
-                                        botao = "G2"
-                                    case ec.BTN_A | ec.KEY_PLAYPAUSE | ec.BTN_TR2:
-                                        botao = "A"
-                                    case ec.BTN_B | ec.BTN_X:
-                                        botao = "B"
-                                    case ec.KEY_VOLUMEUP | ec.BTN_TL2:
-                                        botao = "C"
-                                    case ec.KEY_VOLUMEDOWN | ec.BTN_Y:
-                                        botao = "D"
-                                    case ec.KEY_NEXTSONG:
-                                        botao = "SL"
-                                    case ec.KEY_PREVIOUSSONG:
-                                        botao = "SR"
-
-                                if event.value == 1:
-                                    self._on_button_press(botao)
-                                elif event.value == 0:
-                                    self._on_button_release(botao)
-
-                    except OSError as e:
-                        if e.errno == 19:  # No such device
-                            self._ctx.log(f"- Dispositivo desconectado: {dev.path}")
-                            # Remove dispositivo da lista para não monitorar mais
-                            fd_para_dev.pop(fd, None)
-                            try:
-                                dev.ungrab()
-                            except Exception:
-                                pass
-                            # Opcional: se não há mais dispositivos, pode encerrar ou esperar
-                            if not fd_para_dev:
-                                self._ctx.log(
-                                    "* Nenhum dispositivo restante para monitorar. Encerrando thread."
-                                )
-                                return
-                        else:
-                            raise
-
-        except KeyboardInterrupt:
-            self._ctx.log("\n* Encerrando monitoramento.")
-        finally:
-            for dev in devices:
-                try:
-                    dev.ungrab()
-                except Exception:
-                    pass
+            if event.value == 1:
+                self._on_button_press(botao)
+            elif event.value == 0:
+                self._on_button_release(botao)
