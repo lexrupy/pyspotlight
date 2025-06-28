@@ -165,10 +165,15 @@ class PySpotlightApp(QMainWindow):
         target_index = 0
         if len(all_screens) > 1:
             target_index = 1 if self.ctx.selected_screen == 0 else 0
-        geometry = all_screens[target_index].geometry()
-        if self.info_overlay:
-            self.info_overlay.setGeometry(geometry)
-        self.info_overlay = InfOverlayWindow(geometry)
+            geometry = all_screens[target_index].geometry()
+            if self.info_overlay:
+                self.info_overlay.setGeometry(geometry)
+            self.info_overlay = InfOverlayWindow(geometry)
+        else:
+            if self.info_overlay:
+                self.info_overlay.close()  # Fecha a janela (visualmente)
+                self.info_overlay.deleteLater()  # Marca para limpeza de memória pelo Qt
+                self.info_overlay = None  # Remove a referência
 
     def show_info(self, mensagem):
         if self.info_overlay:
