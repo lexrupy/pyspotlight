@@ -18,50 +18,216 @@ class BaseusOrangeDotAI(BasePointerDevice):
 
     def __init__(self, app_ctx, hidraw_path):
         super().__init__(app_ctx=app_ctx, hidraw_path=hidraw_path)
-        self.last_click_time_113 = 0
         self._ctx.compatible_modes = [MODE_MOUSE, MODE_SPOTLIGHT, MODE_LASER, MODE_PEN]
         self._last_click_time = {}
         self._last_release_time = {}
+        self._pending_click_timers = {}
         self._button_states = {}
-        self._repeat_threads = {}
         self._lock = threading.Lock()
 
-        self._status_byte_map = {
+        self._single_action_buttons = {
             97: "OK",
             98: "OK++",
             99: "OK+long",
-            100: "LASER",
-            106: "PREV",
-            107: "PREV+long",
-            108: "NEXT",
-            109: "NEXT+long",
-            113: "MOUSE",
-            114: "MOUSE+hold",
-            115: "MOUSE+release",
-            116: "MIC",
-            117: "MIC",
-            118: "MIC+hold",
-            119: "MIC+release",
-            122: "LNG",
-            123: "LNG",
-            124: "LNG+hold",
-            125: "LNG+release",
-            103: "HGL",
             104: "HGL+hold",
             105: "HGL+release",
+            107: "PREV+long",
+            109: "NEXT+long",
+            114: "MOUSE+hold",
+            115: "MOUSE+release",
+            118: "MIC+hold",
+            119: "MIC+release",
+            124: "LNG+hold",
+            125: "LNG+release",
+        }
+        self._multiple_action_buttons = {
+            100: "LASER",
+            103: "HGL",
+            106: "PREV",
+            108: "NEXT",
+            113: "MOUSE",
+            116: "MIC",
+            120: "VOL_UP",
+            121: "VOL_DOWN",
+            122: "LNG",
+        }
+
+        self._long_press_buttons = {
+            100: "LASER",
             120: "VOL_UP",
             121: "VOL_DOWN",
         }
 
-    def _start_repeat(self, button):
-        def repeat():
-            while self._button_states.get(button, {}).get("repeat_active", False):
-                self.executa_acao(f"{button}+repeat")
-                time.sleep(self.REPEAT_INTERVAL)
+    # def _on_button_press(self, button):
+    #     now = time.time()
+    #     last_click = self._last_click_time.get(button, 0)
+    #     is_double = 0 < (now - last_click) < self.DOUBLE_CLICK_INTERVAL
+    #
+    #     self._last_click_time[button] = now
+    #
+    #     state = {
+    #         "start_time": now,
+    #         "long_pressed": False,
+    #     }
+    #
+    #     self._button_states[button] = state
+    #
+    #     def single_click():
+    #         if not state.get("long_pressed"):
+    #             if is_double:
+    #                 self.executa_acao(f"{button}++")
+    #             else:
+    #                 self.executa_acao(button)
+    #         self._button_states.pop(button, None)
+    #
+    #     click_timer = threading.Timer(self.LONG_PRESS_INTERVAL + 0.05, single_click)
+    #     click_timer.start()
+    #
+    #     self._last_release_time[button] = now
 
-        t = threading.Thread(target=repeat, daemon=True)
-        self._repeat_threads[button] = t
-        t.start()
+    # def _on_button_press(
+    #     self,
+    #     button,
+    # ):
+    #     now = time.time()
+    #     last_click = self._last_click_time.get(button, 0)
+    #     is_double = 0 < (now - last_click) < self.DOUBLE_CLICK_INTERVAL
+    #
+    #     self._last_click_time[button] = now
+    #
+    #     state = {
+    #         "start_time": now,
+    #         "long_pressed": False,
+    #     }
+    #     self._button_states[button] = state
+    #
+    #     if is_double:
+    #         # Se for duplo clique, cancelar o timer de clique simples do primeiro clique
+    #         timer = self._pending_click_timers.pop(button, None)
+    #         if timer:
+    #             timer.cancel()
+    #         self.executa_acao(f"{button}++")
+    #         return
+    #
+    #     # Clique simples (ainda não sabemos se será duplo ou longo)
+    #     def single_click():
+    #         if not state.get("long_pressed"):
+    #             self.executa_acao(button)
+    #         self._pending_click_timers.pop(button, None)
+    #
+    #     click_timer = threading.Timer(self.LONG_PRESS_INTERVAL + 0.05, single_click)
+    #     click_timer.start()
+    #     self._pending_click_timers[button] = click_timer
+    #
+    #     self._last_release_time[button] = now
+
+    def _build_button_name(self, button, long_press=False, repeat=False):
+        parts = [button]
+        if repeat:
+            parts.append("repeat")
+        elif long_press:
+            parts.append("long")
+        return "+".join(parts)
+
+    def _on_button_press(self, button):
+        now = time.time()
+        last_click_time = self._last_click_time.get(button, 0)
+        self._last_click_time[button] = now
+
+        is_second_click = 0 < (now - last_click_time) < self.DOUBLE_CLICK_INTERVAL
+
+        # Se for segundo clique, dispara ++ e cancela o anterior
+        if is_second_click:
+            timer = self._pending_click_timers.pop(button, None)
+            if timer:
+                timer.cancel()
+            self._ctx.log(f"DOUBLE CLICK -> BOTAO: {button}++")
+            self.executa_acao(f"{button}++")
+            return
+
+        # Caso contrário, agenda clique simples
+        def emitir_clique_simples():
+            # Garante que nenhum clique duplo ou long foi disparado
+            self.executa_acao(button)
+            self._pending_click_timers.pop(button, None)
+
+        timer = threading.Timer(self.DOUBLE_CLICK_INTERVAL, emitir_clique_simples)
+        self._pending_click_timers[button] = timer
+        timer.start()
+
+    def _repeat_timer(self, button):
+        with self._lock:
+            state = self._button_states.get(button)
+            if not state or not state.get("repeat_active"):
+                return
+            button_name = self._build_button_name(button, repeat=True)
+        self.executa_acao(button_name)
+        # Reagenda fora do lock para evitar deadlock
+        t = threading.Timer(self.REPEAT_INTERVAL, self._repeat_timer, args=(button,))
+        with self._lock:
+            # Verifica novamente antes de armazenar/agendar
+            state = self._button_states.get(button)
+            if not state or not state.get("repeat_active"):
+                return
+            state["repeat_timer"] = t
+            t.start()
+
+    def _on_button_release(self, button):
+        state = self._button_states.pop(button, None)
+        if not state:
+            return
+
+        if state.get("combo_disparado"):
+            # não fazer nada no release
+            return
+
+        if "long_timer" in state:
+            state["long_timer"].cancel()
+
+        with self._lock:
+            if "repeat_timer" in state:
+                state["repeat_timer"].cancel()
+
+        # Libera combo
+        for k in list(self._button_states):
+            if self._button_states[k].get("combo_disparado"):
+                self._ctx.log(f"[Combo] {k} liberado (parte de combo)")
+                self._button_states[k]["combo_disparado"] = False
+
+        now = time.time()
+        duration = now - state["start_time"]
+        last_release = self._last_release_time.get(button, 0)
+
+        self._last_release_time[button] = now
+
+        if (
+            last_release > 0
+            and (now - last_release) < self.DOUBLE_CLICK_INTERVAL
+            and duration < self.LONG_PRESS_INTERVAL
+            and not state["long_pressed"]
+        ):
+            self.executa_acao(f"{button}++")
+            return
+
+        # Caso 2: já emitiu long ou repeat, então não faz mais nada
+        if state["long_pressed"] or state["repeat_active"]:
+            return
+
+        # Cancela qualquer clique simples pendente que ainda não foi cancelado
+        timer = self._pending_click_timers.pop(button, None)
+        if timer:
+            timer.cancel()
+
+    def get_button(self, status_byte):
+        all_buttons = self._single_action_buttons | self._multiple_action_buttons
+        _byte = status_byte
+        if status_byte in [116, 117]:
+            _byte = 116
+        elif status_byte in [122, 123]:
+            _byte = 122
+        if _byte in all_buttons:
+            return all_buttons[_byte]
+        return False
 
     def monitor(self):
         super().monitor()
@@ -127,145 +293,26 @@ class BaseusOrangeDotAI(BasePointerDevice):
         status_byte = data[5]
 
         if status_byte == 0:
-            for btn in list(self._button_states):
-                self._button_states[btn]["repeat_active"] = False
+            # Liberou botão: libera todos os botões que estavam ativos
+            for botao in list(self._button_states):
+                self._on_button_release(botao)
             return
 
-        button = self._status_byte_map.get(status_byte)
+        button = self.get_button(status_byte)
 
         if not button:
             return
 
-        if any(
-            suffix in button
-            for suffix in ["++", "+long", "+hold", "+release", "+repeat"]
-        ):
+        self._ctx.log(f"{button}")
+        # Estes botoes executam diretamente, sem tratamento
+        if button in self._single_action_buttons.values():
+            self._ctx.log(f"SINGLE -> BOTAO: {button}")
             self.executa_acao(button)
-            if "+repeat" in button:
-                with self._lock:
-                    self._button_states[button] = {"repeat_active": True}
-            self._ctx.log(f"executa_acao({button})")
-            return
-
-        now = time.time()
-        last_click = self._last_click_time.get(button, 0)
-        last_release = self._last_release_time.get(button, 0)
-        is_double = 0 < (now - last_click) < self.DOUBLE_CLICK_INTERVAL
-
-        self._last_click_time[button] = now
-
-        state = {
-            "start_time": now,
-            "long_pressed": False,
-            "repeat_active": False,
-        }
-
-        def do_long_press():
-            state["long_pressed"] = True
-            state["repeat_active"] = True
-            self.executa_acao(f"{button}+long")
-            self._start_repeat(button)
-
-        # long_timer = threading.Timer(self.LONG_PRESS_INTERVAL, do_long_press)
-        # long_timer.start()
-        # state["long_timer"] = long_timer
-
-        self._button_states[button] = state
-
-        def single_click():
-            if not state.get("long_pressed"):
-                if is_double:
-                    self.executa_acao(f"{button}++")
-                else:
-                    self.executa_acao(button)
-            self._button_states.pop(button, None)
-
-        click_timer = threading.Timer(self.LONG_PRESS_INTERVAL + 0.05, single_click)
-        click_timer.start()
-
-        self._last_release_time[button] = now
-
-        # self._ctx.log(f"executa_acao_byte({status_byte})")
-        # self.executa_acao_byte(status_byte)
-
-    def executa_acao_byte(self, status_byte):
-        ow = self._ctx.overlay_window
-        current_mode = self._ctx.overlay_window.current_mode()
-
-        match status_byte:
-            case 97:
-                if current_mode == MODE_MOUSE:
-                    self.emit_key_press(self._ctx.ui, uinput.BTN_LEFT)
-                else:
-                    ow.switch_mode(direct_mode=MODE_MOUSE)
-            case 99:
-                if current_mode == MODE_MOUSE:
-                    ow.switch_mode()
-            case 103:
-                if current_mode == MODE_MOUSE:
-                    self.emit_key_press(self._ctx.ui, uinput.KEY_B)
-                else:
-                    ow.clear_drawing()
-            case 104 | 114:
-                ow.handle_draw_command("start_move")
-            case 105 | 115:
-                ow.handle_draw_command("stop_move")
-            case 106:
-                if current_mode == MODE_MOUSE:
-                    self.emit_key_press(self._ctx.ui, uinput.KEY_PAGEUP)
-                elif current_mode == MODE_PEN:
-                    ow.change_line_width(-1)
-                elif current_mode == MODE_SPOTLIGHT:
-                    ow.change_spot_radius(-1)
-            case 107:
-                if current_mode == MODE_MOUSE:
-                    self.emit_key_press(self._ctx.ui, uinput.KEY_ESC)
-                else:
-                    ow.set_mouse_mode()
-            case 108:
-                if current_mode == MODE_MOUSE:
-                    self.emit_key_press(self._ctx.ui, uinput.KEY_PAGEDOWN)
-                elif current_mode == MODE_PEN:
-                    ow.change_line_width(+1)
-                elif current_mode == MODE_SPOTLIGHT:
-                    ow.change_spot_radius(+1)
-            case 109:
-                if current_mode == MODE_MOUSE:
-                    self.emit_key_chord(
-                        self._ctx.ui, [uinput.KEY_LEFTSHIFT, uinput.KEY_F5]
-                    )
-            case 113:
-                now = time.time()
-                if now - self.last_click_time_113 < self.DOUBLE_CLICK_INTERVAL:
-                    if current_mode == MODE_MOUSE:
-                        ow.switch_mode(direct_mode=MODE_SPOTLIGHT)
-                    else:
-                        ow.switch_mode()
-                self.last_click_time_113 = now
-            case 116 | 117:
-                if current_mode in [MODE_PEN, MODE_LASER]:
-                    ow.next_color()
-            case 118:
-                if current_mode == MODE_SPOTLIGHT:
-                    ow.adjust_overlay_color(0, 10)
-            case 120:
-                if current_mode == MODE_MOUSE:
-                    self.emit_key_press(self._ctx.ui, uinput.KEY_VOLUMEUP)
-                elif current_mode == MODE_SPOTLIGHT:
-                    ow.zoom(+1)
-            case 121:
-                if current_mode == MODE_MOUSE:
-                    self.emit_key_press(self._ctx.ui, uinput.KEY_VOLUMEDOWN)
-                else:
-                    ow.zoom(-1)
-            case 122 | 123:
-                if current_mode in [MODE_PEN, MODE_LASER]:
-                    ow.next_color(-1)
-            case 124:
-                if current_mode == MODE_SPOTLIGHT:
-                    ow.adjust_overlay_color(0, -10)
+        else:
+            self._on_button_press(button)
 
     def executa_acao(self, button):
+
         ow = self._ctx.overlay_window
         current_mode = self._ctx.overlay_window.current_mode()
 
@@ -292,11 +339,10 @@ class BaseusOrangeDotAI(BasePointerDevice):
                 elif current_mode == MODE_SPOTLIGHT:
                     ow.change_spot_radius(+1)
             case "MOUSE":
-                ow.switch_mode(
-                    direct_mode=(
-                        MODE_SPOTLIGHT if current_mode == MODE_MOUSE else MODE_MOUSE
-                    )
-                )
+                if current_mode == MODE_MOUSE:
+                    ow.set_last_pointer_mode()
+                else:
+                    ow.switch_mode()
             case "MIC":
                 if current_mode in [MODE_PEN, MODE_LASER]:
                     ow.next_color()
@@ -318,8 +364,6 @@ class BaseusOrangeDotAI(BasePointerDevice):
                     self.emit_key_press(self._ctx.ui, uinput.KEY_VOLUMEDOWN)
                 else:
                     ow.zoom(-1)
-            case _:
-                self._ctx.log(f"BOTAO: {button}")
 
     def handle_event(self, event):
         if event.type == ec.EV_REL or (

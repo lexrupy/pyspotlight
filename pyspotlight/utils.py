@@ -14,7 +14,7 @@ MODE_MOUSE = 3
 MODE_MAP = {
     MODE_SPOTLIGHT: "Modo Spotlight",
     MODE_LASER: "Modo Laser",
-    MODE_PEN: "Modo Caneta",
+    MODE_PEN: "Modo Marcador",
     MODE_MOUSE: "Modo Mouse",
 }
 

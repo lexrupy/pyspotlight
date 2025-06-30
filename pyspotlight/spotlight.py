@@ -189,7 +189,7 @@ class SpotlightOverlayWindow(QWidget):
 
         if direct_mode >= 0:
             if direct_mode in compatible:
-                self._ctx.log(f"Modo direto: {MODE_MAP[direct_mode]}")
+                # self._ctx.log(f"Modo direto: {MODE_MAP[direct_mode]}")
                 self.apply_mode_change(direct_mode)
             return
 
@@ -216,7 +216,7 @@ class SpotlightOverlayWindow(QWidget):
         if self.mode in [MODE_SPOTLIGHT, MODE_LASER, MODE_PEN]:
             self.last_pointer_mode = self.mode
 
-        self._ctx.log(f"Modo atual: {MODE_MAP[self.mode]}")
+        # self._ctx.log(f"Modo atual: {MODE_MAP[self.mode]}")
         self._ctx.show_info(MODE_MAP[self.mode])
 
     def change_laser_size(self, delta: int):

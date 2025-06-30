@@ -65,37 +65,6 @@ class GenericVRBoxPointer(BasePointerDevice):
 
         def set_long_pressed():
             state["long_pressed"] = True
-            # # Aqui detecta combo no momento do long press
-            # combo_detected = False
-            # for outro_botao, outro_estado in self._button_states.items():
-            #     if outro_botao == botao:
-            #         continue
-            #     if outro_estado.get("combo_disparado"):
-            #         continue
-            #     # Checa se outro botão também está em long press
-            #     if outro_estado.get("long_pressed"):
-            #         tempo_entre = abs(state["start_time"] - outro_estado["start_time"])
-            #         if tempo_entre < self.COMBO_WINDOW:
-            #             # Combo detectado
-            #             nomes = sorted([botao, outro_botao])
-            #             combo_nome = "+".join(nomes)
-            #             self._ctx.log(f"[Combo] {combo_nome} detectado")
-            #
-            #             # Marca ambos como combo disparado
-            #             self._button_states[botao]["combo_disparado"] = True
-            #             self._button_states[outro_botao]["combo_disparado"] = True
-            #
-            #             # Cancela timers simples pendentes dos dois botões
-            #             for b in (botao, outro_botao):
-            #                 t = self._pending_click_timers.pop(b, None)
-            #                 if t:
-            #                     t.cancel()
-            #
-            #             self.executa_acao(combo_nome, state=1)
-            #             combo_detected = True
-            #             break
-            #
-            # if not combo_detected:
             timer = self._pending_click_timers.pop(botao, None)
             if timer:
                 timer.cancel()
@@ -136,15 +105,6 @@ class GenericVRBoxPointer(BasePointerDevice):
             )
             click_timer.start()
             self._pending_click_timers[botao] = click_timer
-
-    # def _repeat_timer(self, botao):
-    #     state = self._button_states.get(botao)
-    #     if state and state["repeat_active"]:
-    #         button = self._build_button_name(botao, repeat=True)
-    #         self.executa_acao(button, state=1)
-    #         t = threading.Timer(self.REPEAT_INTERVAL, self._repeat_timer, args=(botao,))
-    #         state["repeat_timer"] = t
-    #         t.start()
 
     def _repeat_timer(self, botao):
         with self._lock:
