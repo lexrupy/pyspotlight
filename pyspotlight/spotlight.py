@@ -48,6 +48,8 @@ class SpotlightOverlayWindow(QWidget):
         self.mode = MODE_MOUSE
         self.last_pointer_mode = MODE_SPOTLIGHT
 
+        self.auto_mode_enabled = False
+
         self.last_key_time = 0
         self.last_key_pressed = 0
 
@@ -70,9 +72,13 @@ class SpotlightOverlayWindow(QWidget):
             QColor(255, 165, 0),  # Laranja forte
             QColor(255, 255, 255),  # Branco
             QColor(0, 0, 0),  # Preto
+            # SE INCLUIR MAIS CORES MANTER ESTA A ÚLTIMA
             QColor(0, 0, 0, 0),  # Preto
         ]
+
+        self.pen_colors = self.laser_colors[:-1]
         self.laser_index = 0
+        self.pen_index = 0
         self.laser_size = 10
 
         self.pen_paths = []  # Lista de listas de pontos (QPoint)
@@ -83,7 +89,7 @@ class SpotlightOverlayWindow(QWidget):
         self.setGeometry(screen_geometry)
         self.pixmap = QPixmap.fromImage(screenshot)
 
-        self.pen_color = self.laser_colors[self.laser_index]
+        self.pen_color = self.pen_colors[self.pen_index]
 
         self.cursor_pos = None  # Usado para exibir a caneta
 
@@ -113,6 +119,7 @@ class SpotlightOverlayWindow(QWidget):
 
         config["Laser"] = {
             "laser_index": str(self.laser_index),
+            "pen_index": str(self.pen_index),
             "laser_size": str(self.laser_size),
         }
 
@@ -145,23 +152,35 @@ class SpotlightOverlayWindow(QWidget):
 
         if "Laser" in config:
             self.laser_index = int(config["Laser"].get("laser_index", self.laser_index))
+            self.pen_index = int(config["Laser"].get("pen_index", self.pen_index))
             self.laser_size = int(config["Laser"].get("laser_size", self.laser_size))
-            self.pen_color = self.laser_colors[self.laser_index]
+            self.pen_color = self.pen_colors[self.pen_index]
 
-    def adjust_overlay_color(self, step_color=0, step_alpha=0):
+    def adjust_overlay_color(self, step_color=0, step_alpha=0, direct=False):
         r = self.overlay_color.red()
         g = self.overlay_color.green()
         b = self.overlay_color.blue()
         a = self.overlay_color.alpha()
 
+        if direct:
+            nr = step_color
+            ng = step_color
+            nb = step_color
+            na = step_alpha
+        else:
+            nr = r + step_color
+            ng = g + step_color
+            nb = b + step_color
+            na = a + step_alpha
+
         if step_color != 0:
-            r = min(max(r + step_color, 0), 255)
-            g = min(max(g + step_color, 0), 255)
-            b = min(max(b + step_color, 0), 255)
+            r = min(max(nr, 0), 255)
+            g = min(max(ng, 0), 255)
+            b = min(max(nb, 0), 255)
+        if step_alpha != 0:
+            a = min(max(na, 0), 255)
+            self.overlay_alpha = a  # mantém coerência com o atributo
 
-        a = min(max(a + step_alpha, 0), 255)
-
-        self.overlay_alpha = a  # mantém coerência com o atributo
         self.overlay_color = QColor(r, g, b, a)
         self.update()
 
@@ -181,15 +200,22 @@ class SpotlightOverlayWindow(QWidget):
         if self.last_pointer_mode in self._ctx.compatible_modes:
             self.switch_mode(direct_mode=self.last_pointer_mode)
 
+    def set_auto_mode(self, enable=True):
+        self.auto_mode_enabled = enable
+        if enable:
+            self._ctx.show_info(f"{MODE_MAP[self.last_pointer_mode]} - AUTO")
+        else:
+            self._ctx.show_info(f"{MODE_MAP[self.mode]}")
+
     def switch_mode(self, step=1, direct_mode=-1):
         compatible = self._ctx.compatible_modes
         all_modes = list(MODE_MAP.keys())  # usa ordem de definição dos modos
+
         if not compatible:
             return
 
         if direct_mode >= 0:
             if direct_mode in compatible:
-                # self._ctx.log(f"Modo direto: {MODE_MAP[direct_mode]}")
                 self.apply_mode_change(direct_mode)
             return
 
@@ -205,6 +231,7 @@ class SpotlightOverlayWindow(QWidget):
                 return
 
     def apply_mode_change(self, new_mode):
+        last_mode = self.mode
         self.mode = new_mode
 
         if self.mode == MODE_MOUSE:
@@ -213,11 +240,12 @@ class SpotlightOverlayWindow(QWidget):
             self.capture_screenshot()
             self.update()
 
-        if self.mode in [MODE_SPOTLIGHT, MODE_LASER, MODE_PEN]:
+        if self.mode in [MODE_SPOTLIGHT, MODE_LASER] and last_mode != self.mode:
             self.last_pointer_mode = self.mode
 
         # self._ctx.log(f"Modo atual: {MODE_MAP[self.mode]}")
-        self._ctx.show_info(MODE_MAP[self.mode])
+        if not self.auto_mode_enabled:
+            self._ctx.show_info(MODE_MAP[self.mode])
 
     def change_laser_size(self, delta: int):
         min_size = 5
@@ -249,9 +277,13 @@ class SpotlightOverlayWindow(QWidget):
                 self.zoom_factor = max(self.zoom_min, self.zoom_factor - 1.0)
             self.update()
 
-    def next_color(self, step=1):
+    def next_laser_color(self, step=1):
         self.laser_index = (self.laser_index + step) % len(self.laser_colors)
-        self.pen_color = self.laser_colors[self.laser_index]
+        self.update()
+
+    def next_pen_color(self, step=1):
+        self.pen_index = (self.pen_index + step) % len(self.pen_colors)
+        self.pen_color = self.pen_colors[self.pen_index]
         self.update()
 
     def clear_drawing(self, all=False):
@@ -317,7 +349,7 @@ class SpotlightOverlayWindow(QWidget):
             painter.setClipping(False)
 
             # Borda translúcida ao redor da lente
-            border_color = QColor(self.laser_colors[self.laser_index])
+            border_color = QColor(self.pen_colors[self.pen_index])
             border_color.setAlphaF(0.3)
             pen = QPen(border_color, 6)
             painter.setPen(pen)
