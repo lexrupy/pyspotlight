@@ -21,7 +21,6 @@ class GenericVRBoxPointer(BasePointerDevice):
     }
     LONG_PRESS_INTERVAL = 0.6  # tempo mínimo para considerar pressionamento longo
     DOUBLE_CLICK_INTERVAL = 0.4  # segundos
-    COMBO_WINDOW = 0.3
     REPEAT_INTERVAL = 0.05
 
     def __init__(self, app_ctx, hidraw_path):
@@ -60,7 +59,6 @@ class GenericVRBoxPointer(BasePointerDevice):
             "long_pressed": False,
             "repeat_active": False,
             "is_second_click": is_second_click,
-            "combo_disparado": False,
         }
 
         def set_long_pressed():
@@ -87,7 +85,7 @@ class GenericVRBoxPointer(BasePointerDevice):
             self._pending_click_timers[botao].cancel()
             del self._pending_click_timers[botao]
 
-        # Agenda clique simples só se não for second click e sem combo detectado ainda
+        # Agenda clique simples só se não for second click
         if not is_second_click:
 
             def emitir_clique_simples():
@@ -95,7 +93,6 @@ class GenericVRBoxPointer(BasePointerDevice):
                 if current_state is None or (
                     not current_state["long_pressed"]
                     and not current_state["repeat_active"]
-                    and not current_state.get("combo_disparado", False)
                 ):
                     self.executa_acao(botao, state=1)
                 self._pending_click_timers.pop(botao, None)
@@ -128,22 +125,12 @@ class GenericVRBoxPointer(BasePointerDevice):
         if not state:
             return
 
-        if state.get("combo_disparado"):
-            # não fazer nada no release
-            return
-
         if "long_timer" in state:
             state["long_timer"].cancel()
 
         with self._lock:
             if "repeat_timer" in state:
                 state["repeat_timer"].cancel()
-
-        # Libera combo
-        for k in list(self._button_states):
-            if self._button_states[k].get("combo_disparado"):
-                self._ctx.log(f"[Combo] {k} liberado (parte de combo)")
-                self._button_states[k]["combo_disparado"] = False
 
         now = time.time()
         duration = now - state["start_time"]
@@ -246,7 +233,6 @@ class GenericVRBoxPointer(BasePointerDevice):
 
         elif event.type == ec.EV_KEY:
             botao = None
-            all_keys = ec.KEY | ec.BTN
             match event.code:
                 case ec.BTN_LEFT | ec.BTN_TL:
                     botao = "G1"
