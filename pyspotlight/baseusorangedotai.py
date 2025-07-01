@@ -58,69 +58,6 @@ class BaseusOrangeDotAI(BasePointerDevice):
             121: "VOL_DOWN",
         }
 
-    # def _on_button_press(self, button):
-    #     now = time.time()
-    #     last_click = self._last_click_time.get(button, 0)
-    #     is_double = 0 < (now - last_click) < self.DOUBLE_CLICK_INTERVAL
-    #
-    #     self._last_click_time[button] = now
-    #
-    #     state = {
-    #         "start_time": now,
-    #         "long_pressed": False,
-    #     }
-    #
-    #     self._button_states[button] = state
-    #
-    #     def single_click():
-    #         if not state.get("long_pressed"):
-    #             if is_double:
-    #                 self.executa_acao(f"{button}++")
-    #             else:
-    #                 self.executa_acao(button)
-    #         self._button_states.pop(button, None)
-    #
-    #     click_timer = threading.Timer(self.LONG_PRESS_INTERVAL + 0.05, single_click)
-    #     click_timer.start()
-    #
-    #     self._last_release_time[button] = now
-
-    # def _on_button_press(
-    #     self,
-    #     button,
-    # ):
-    #     now = time.time()
-    #     last_click = self._last_click_time.get(button, 0)
-    #     is_double = 0 < (now - last_click) < self.DOUBLE_CLICK_INTERVAL
-    #
-    #     self._last_click_time[button] = now
-    #
-    #     state = {
-    #         "start_time": now,
-    #         "long_pressed": False,
-    #     }
-    #     self._button_states[button] = state
-    #
-    #     if is_double:
-    #         # Se for duplo clique, cancelar o timer de clique simples do primeiro clique
-    #         timer = self._pending_click_timers.pop(button, None)
-    #         if timer:
-    #             timer.cancel()
-    #         self.executa_acao(f"{button}++")
-    #         return
-    #
-    #     # Clique simples (ainda não sabemos se será duplo ou longo)
-    #     def single_click():
-    #         if not state.get("long_pressed"):
-    #             self.executa_acao(button)
-    #         self._pending_click_timers.pop(button, None)
-    #
-    #     click_timer = threading.Timer(self.LONG_PRESS_INTERVAL + 0.05, single_click)
-    #     click_timer.start()
-    #     self._pending_click_timers[button] = click_timer
-    #
-    #     self._last_release_time[button] = now
-
     def _build_button_name(self, button, long_press=False, repeat=False):
         parts = [button]
         if repeat:
@@ -141,7 +78,6 @@ class BaseusOrangeDotAI(BasePointerDevice):
             timer = self._pending_click_timers.pop(button, None)
             if timer:
                 timer.cancel()
-            self._ctx.log(f"DOUBLE CLICK -> BOTAO: {button}++")
             self.executa_acao(f"{button}++")
             return
 
@@ -177,22 +113,12 @@ class BaseusOrangeDotAI(BasePointerDevice):
         if not state:
             return
 
-        if state.get("combo_disparado"):
-            # não fazer nada no release
-            return
-
         if "long_timer" in state:
             state["long_timer"].cancel()
 
         with self._lock:
             if "repeat_timer" in state:
                 state["repeat_timer"].cancel()
-
-        # Libera combo
-        for k in list(self._button_states):
-            if self._button_states[k].get("combo_disparado"):
-                self._ctx.log(f"[Combo] {k} liberado (parte de combo)")
-                self._button_states[k]["combo_disparado"] = False
 
         now = time.time()
         duration = now - state["start_time"]
@@ -303,15 +229,15 @@ class BaseusOrangeDotAI(BasePointerDevice):
         if not button:
             return
 
-        self._ctx.log(f"{button}")
         # Estes botoes executam diretamente, sem tratamento
         if button in self._single_action_buttons.values():
-            self._ctx.log(f"SINGLE -> BOTAO: {button}")
             self.executa_acao(button)
         else:
             self._on_button_press(button)
 
     def executa_acao(self, button):
+
+        self._ctx.log(f"{button}")
 
         ow = self._ctx.overlay_window
         current_mode = self._ctx.overlay_window.current_mode()
@@ -338,7 +264,7 @@ class BaseusOrangeDotAI(BasePointerDevice):
                     ow.change_line_width(+1)
                 elif current_mode == MODE_SPOTLIGHT:
                     ow.change_spot_radius(+1)
-            case "MOUSE":
+            case "MOUSE++":
                 if current_mode == MODE_MOUSE:
                     ow.set_last_pointer_mode()
                 else:
