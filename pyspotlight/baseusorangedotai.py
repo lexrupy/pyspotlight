@@ -378,7 +378,8 @@ class BaseusOrangeDotAI(BasePointerDevice):
             case "OK+long":
                 ow.set_auto_mode(not ow.auto_mode_enabled)
             case "LASER":
-                ow.set_last_pointer_mode()
+                # ow.set_last_pointer_mode()
+                pass
             case "PREV":
                 if current_mode == MODE_MOUSE:
                     self.emit_key_press(self._ctx.ui, uinput.KEY_PAGEUP)
@@ -387,8 +388,11 @@ class BaseusOrangeDotAI(BasePointerDevice):
                 # elif current_mode == MODE_SPOTLIGHT:
                 #     ow.change_spot_radius(-1)
             case "PREV+long":
-                if current_mode != MODE_MOUSE:
+                if current_mode == MODE_MOUSE:
+                    self.emit_key_press(self._ctx.ui, uinput.KEY_ESC)
+                else:
                     ow.switch_mode(direct_mode=MODE_MOUSE)
+
             case "NEXT":
                 if current_mode == MODE_MOUSE:
                     self.emit_key_press(self._ctx.ui, uinput.KEY_PAGEDOWN)
@@ -396,6 +400,11 @@ class BaseusOrangeDotAI(BasePointerDevice):
                 #     ow.change_line_width(+1)
                 # elif current_mode == MODE_SPOTLIGHT:
                 #     ow.change_spot_radius(+1)
+            case "NEXT+long":
+                if current_mode == MODE_MOUSE:
+                    self.emit_key_chord(
+                        self._ctx.ui, [uinput.KEY_LEFTSHIFT, uinput.KEY_F5]
+                    )
             case "MOUSE":
                 if not self.check_hold_repeat("MOUSE"):
                     pass
