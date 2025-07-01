@@ -12,7 +12,7 @@ class BaseusOrangeDotAI(BasePointerDevice):
     VENDOR_ID = 0xABC8
     PRODUCT_ID = 0xCA08
     PRODUCT_DESCRIPTION = "Baseus Orange Dot AI Wireless Presenter"
-    DOUBLE_CLICK_INTERVAL = 0.3
+    DOUBLE_CLICK_INTERVAL = 0.4
     LONG_PRESS_INTERVAL = 0.6
     REPEAT_INTERVAL = 0.05
 
@@ -23,12 +23,14 @@ class BaseusOrangeDotAI(BasePointerDevice):
         self._last_release_time = {}
         self._pending_click_timers = {}
         self._button_states = {}
+        self._ultimo_botao_ativo = None
         self._lock = threading.Lock()
 
         self._single_action_buttons = {
             97: "OK",
             98: "OK++",
             99: "OK+long",
+            100: "LASER",
             104: "HGL+hold",
             105: "HGL+release",
             107: "PREV+long",
@@ -41,21 +43,14 @@ class BaseusOrangeDotAI(BasePointerDevice):
             125: "LNG+release",
         }
         self._multiple_action_buttons = {
-            100: "LASER",
-            103: "HGL",
             106: "PREV",
             108: "NEXT",
             113: "MOUSE",
             116: "MIC",
-            120: "VOL_UP",
-            121: "VOL_DOWN",
             122: "LNG",
-        }
-
-        self._long_press_buttons = {
-            100: "LASER",
-            120: "VOL_UP",
-            121: "VOL_DOWN",
+            # 103: "HGL", # MONITORADO EM INPUT EVENTS
+            # 120: "VOL_UP", # MONITORADO EM INPUT EVENTS
+            # 121: "VOL_DOWN", # MONITORADO EM INPUT EVENTS
         }
 
     def _build_button_name(self, button, long_press=False, repeat=False):
@@ -69,9 +64,10 @@ class BaseusOrangeDotAI(BasePointerDevice):
     def _on_button_press(self, button):
         now = time.time()
         last_click_time = self._last_click_time.get(button, 0)
-        self._last_click_time[button] = now
 
-        is_second_click = 0 < (now - last_click_time) < self.DOUBLE_CLICK_INTERVAL
+        interval = now - last_click_time
+
+        is_second_click = 0 < interval < self.DOUBLE_CLICK_INTERVAL
 
         # Se for segundo clique, dispara ++ e cancela o anterior
         if is_second_click:
@@ -81,15 +77,19 @@ class BaseusOrangeDotAI(BasePointerDevice):
             self.executa_acao(f"{button}++")
             return
 
+        self._last_click_time[button] = now
+
         # Caso contrário, agenda clique simples
         def emitir_clique_simples():
             # Garante que nenhum clique duplo ou long foi disparado
-            self.executa_acao(button)
-            self._pending_click_timers.pop(button, None)
+            if self._pending_click_timers.pop(button, None):
+                self.executa_acao(button)
 
         timer = threading.Timer(self.DOUBLE_CLICK_INTERVAL, emitir_clique_simples)
         self._pending_click_timers[button] = timer
         timer.start()
+
+        # self._ctx.log(f"TIME _on_button_press: {now}")
 
     def _repeat_timer(self, button):
         with self._lock:
@@ -121,28 +121,14 @@ class BaseusOrangeDotAI(BasePointerDevice):
                 state["repeat_timer"].cancel()
 
         now = time.time()
-        duration = now - state["start_time"]
-        last_release = self._last_release_time.get(button, 0)
 
         self._last_release_time[button] = now
-
-        if (
-            last_release > 0
-            and (now - last_release) < self.DOUBLE_CLICK_INTERVAL
-            and duration < self.LONG_PRESS_INTERVAL
-            and not state["long_pressed"]
-        ):
-            self.executa_acao(f"{button}++")
-            return
-
-        # Caso 2: já emitiu long ou repeat, então não faz mais nada
-        if state["long_pressed"] or state["repeat_active"]:
-            return
 
         # Cancela qualquer clique simples pendente que ainda não foi cancelado
         timer = self._pending_click_timers.pop(button, None)
         if timer:
             timer.cancel()
+        # self._ctx.log(f"TIME _on_button_release: {now}")
 
     def get_button(self, status_byte):
         all_buttons = self._single_action_buttons | self._multiple_action_buttons
@@ -222,6 +208,7 @@ class BaseusOrangeDotAI(BasePointerDevice):
             # Liberou botão: libera todos os botões que estavam ativos
             for botao in list(self._button_states):
                 self._on_button_release(botao)
+            self._ultimo_botao_ativo = None
             return
 
         button = self.get_button(status_byte)
@@ -233,10 +220,19 @@ class BaseusOrangeDotAI(BasePointerDevice):
         if button in self._single_action_buttons.values():
             self.executa_acao(button)
         else:
+            # Se for um novo botão e havia outro ativo, libera o anterior
+            if self._ultimo_botao_ativo and self._ultimo_botao_ativo != button:
+                self._on_button_release(self._ultimo_botao_ativo)
+
+            # Atualiza botão atualmente ativo
+            self._ultimo_botao_ativo = button
+
+            # Processa pressão do novo botão
             self._on_button_press(button)
 
     def executa_acao(self, button):
-
+        # now = time.time()
+        # self._ctx.log(f"TIME executa_acao({button}) {now}")
         self._ctx.log(f"{button}")
 
         ow = self._ctx.overlay_window
@@ -292,13 +288,25 @@ class BaseusOrangeDotAI(BasePointerDevice):
                     ow.zoom(-1)
 
     def handle_event(self, event):
-        if event.type == ec.EV_REL or (
-            event.type == ec.EV_KEY
-            and event.code
-            in (
-                ec.BTN_LEFT,
-                ec.BTN_RIGHT,
-            )
-        ):
-            # Repassa evento virtual com cuidado
+        if event.type == ec.EV_REL:  # Movimento de Mouse
+            # Repassa evento virtual
             self._ctx.ui.emit((event.type, event.code), event.value)
+
+        elif event.type == ec.EV_KEY:
+            button = None
+            match event.code:
+                case ec.BTN_LEFT | ec.BTN_RIGHT:
+                    # emite cliques, por enquanto
+                    self._ctx.ui.emit((event.type, event.code), event.value)
+                case ec.KEY_VOLUMEUP:
+                    button = "VOL_UP"
+                case ec.KEY_VOLUMEDOWN:
+                    button = "VOL_DOWN"
+                case ec.KEY_E:
+                    button = "HGL"
+
+            if button:
+                if event.value == 1:
+                    self._on_button_press(button)
+                elif event.value == 0:
+                    self._on_button_release(button)
