@@ -23,9 +23,10 @@ class BasePointerDevice(metaclass=SingletonMeta):
 
     def __init__(self, app_ctx, hidraw_path):
         self.path = hidraw_path
-
         self._stop_event = threading.Event()
+        self._stop_hidraw_event = threading.Event()
         self._event_thread = None
+        self._hidraw_thread = None
         self._ctx = app_ctx
         self._device_name = None
         self._known_paths = []
@@ -63,13 +64,24 @@ class BasePointerDevice(metaclass=SingletonMeta):
 
     def monitor(self):
         self.start_event_blocking()
+        self.start_hidraw_monitoring()
 
-    def stop(self):
+    def start_hidraw_monitoring(self):
+        pass
+
+    def stop_hidraw_monitoring(self):
+        self._stop_hidraw_event.set()
+
+    def stop_event_blocking(self):
+        self._stop_event.set()
         if self._event_thread and self._event_thread.is_alive():
-            self._stop_event.set()
             self._event_thread.join(
                 timeout=1
             )  # espera a thread encerrar (timeout opcional)
+
+    def stop(self):
+        self.stop_event_blocking()
+        self.stop_hidraw_monitoring()
 
     def ensure_monitoring(self):
         if (

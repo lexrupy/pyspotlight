@@ -49,6 +49,7 @@ class DeviceMonitor:
         # Encontra a classe correspondente à instância
         for cls, inst in list(self._monitored_devices.items()):
             if inst is dev:
+                inst.stop()
                 del self._monitored_devices[cls]
                 break
         self._notify_callbacks()
@@ -100,7 +101,7 @@ class DeviceMonitor:
 
         if action == "add":
             if path.startswith("/dev/hidraw") or path.startswith("/dev/input"):
-                time.sleep(0.3)
+                time.sleep(0.8)
                 for dev in self.get_monitored_devices():
                     if dev.known_path(path):
                         return  # já monitorado
@@ -123,6 +124,7 @@ class DeviceMonitor:
             context = pyudev.Context()
             monitor = pyudev.Monitor.from_netlink(context)
             monitor.filter_by("input")
+            monitor.filter_by("hidraw")
             monitor.start()
 
             for device in iter(monitor.poll, None):

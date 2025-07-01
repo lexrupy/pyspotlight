@@ -251,14 +251,16 @@ class BaseusOrangeDotAI(BasePointerDevice):
             return all_buttons[_byte]
         return False
 
-    def monitor(self):
-        super().monitor()
-        self.start_hidraw_monitoring()
+    def stop(self):
+        super().stop()
+        for t in self._pending_click_timers.values():
+            t.cancel()
+        self._pending_click_timers.clear()
 
     def start_hidraw_monitoring(self):
-        if hasattr(self, "_hidraw_thread_started") and self._hidraw_thread_started:
+        if self._hidraw_thread and self._hidraw_thread.is_alive():
             return
-        self._hidraw_thread_started = True
+        # time.sleep(0.8)
 
         def run():
             try:
@@ -281,7 +283,17 @@ class BaseusOrangeDotAI(BasePointerDevice):
             except Exception as e:
                 self._ctx.log(f"*  Erro em {self.path}: {e}")
 
-        threading.Thread(target=run, daemon=True).start()
+        # self._hidraw_thread = threading.Thread(target=run, daemon=True).start()
+        self._hidraw_thread = threading.Thread(target=run, daemon=True)
+        self._hidraw_thread.start()
+
+    def stop_hidraw_monitoring(self):
+        self._stop_hidraw_event.set()
+        if self._hidraw_thread and self._hidraw_thread.is_alive():
+            self._stop_hidraw_event.set()
+            self._hidraw_thread.join(
+                timeout=1
+            )  # espera a thread encerrar (timeout opcional)
 
     def read_pacotes_completos(self, f):
         buffer = bytearray()
@@ -408,7 +420,7 @@ class BaseusOrangeDotAI(BasePointerDevice):
                 if self.end_hold_repeat("LNG"):
                     self._ctx.log(f"Encerrado Repeat LNG")
                 else:
-                    self._ctx.log(f"-> MIC+release")
+                    self._ctx.log(f"-> LNG+release")
             case "LNG+repeat":
                 pass
             case "HGL":
