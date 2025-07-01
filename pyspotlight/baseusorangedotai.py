@@ -25,6 +25,7 @@ class BaseusOrangeDotAI(BasePointerDevice):
         self._button_states = {}
         self._ultimo_botao_ativo = None
         self._lock = threading.Lock()
+        self._hold_states = {}
 
         self._single_action_buttons = {
             97: "OK",
@@ -48,11 +49,12 @@ class BaseusOrangeDotAI(BasePointerDevice):
             113: "MOUSE",
             116: "MIC",
             122: "LNG",
+            # botoes tratados em input events pois se comportam de forma estranha em hidraw quanto ao press/release
             # 103: "HGL", # MONITORADO EM INPUT EVENTS
             # 120: "VOL_UP", # MONITORADO EM INPUT EVENTS
             # 121: "VOL_DOWN", # MONITORADO EM INPUT EVENTS
         }
-        self._virtual_hold_buttons = {"VOL_UP", "VOL_DOWN"}
+        self._virtual_repeat_buttons = {"MIC", "LNG", "MOUSE"}
 
     def _build_button_name(self, button, long_press=False, repeat=False):
         parts = [button]
@@ -111,8 +113,8 @@ class BaseusOrangeDotAI(BasePointerDevice):
             def emitir_clique_simples():
                 current_state = self._button_states.get(botao)
                 if current_state is None or (
-                    not current_state["long_pressed"]
-                    and not current_state["repeat_active"]
+                    not current_state.get("long_pressed", False)
+                    and not current_state.get("repeat_active", False)
                 ):
                     self.executa_acao(botao)
                 self._pending_click_timers.pop(botao, None)
@@ -151,7 +153,7 @@ class BaseusOrangeDotAI(BasePointerDevice):
             return
 
         # Caso 2: já emitiu long ou repeat, então não faz mais nada
-        if state["long_pressed"] or state["repeat_active"]:
+        if state.get("long_pressed", False) or state.get("repeat_active", False):
             self.executa_acao(f"{botao}+release")
             return
 
@@ -169,16 +171,34 @@ class BaseusOrangeDotAI(BasePointerDevice):
             state = self._button_states.get(botao)
             if not state or not state.get("repeat_active"):
                 return
+            # Cancelar timer anterior, se existir
+            old_timer = state.get("repeat_timer")
+            if old_timer:
+                old_timer.cancel()
             state["repeat_timer"] = t
             t.start()
 
-    def _start_hold_repeat(self, button):
+    def check_hold_repeat(self, button):
+        now = time.time()
+        hold_start = self.get_hold_start(button)
+        hold_time = self.get_hold_time(button)
+        timer = now - hold_time
+        if hold_start and timer < self.LONG_PRESS_INTERVAL:
+            self.set_hold_start(button, False)
+            self.start_hold_repeat(button)
+            return True
+        return False
+
+    def start_hold_repeat(self, button):
+        if button not in self._virtual_repeat_buttons:
+            return False
         with self._lock:
             estado = self._button_states.get(button)
             if not estado:
                 estado = {
                     "repeat_active": True,
                     "hold_active": True,
+                    "long_pressed": False,
                     "start_time": time.time(),
                 }
                 self._button_states[button] = estado
@@ -189,7 +209,7 @@ class BaseusOrangeDotAI(BasePointerDevice):
         # Inicia o timer de repeat
         self._repeat_timer(button)
 
-    def _end_hold_repeat(self, button):
+    def end_hold_repeat(self, button):
         with self._lock:
             estado = self._button_states.get(button)
             if not estado:
@@ -200,8 +220,25 @@ class BaseusOrangeDotAI(BasePointerDevice):
             if repeat_timer:
                 repeat_timer.cancel()
                 del estado["repeat_timer"]
+                return True
+        return False
 
         # self.executa_acao(f"{button}+release")
+
+    def set_hold_start(self, button, value=True):
+        now = time.time()
+        self._hold_states[button] = self._hold_states.get(button, {})
+        self._hold_states[button]["hold_start"] = value
+        if value:
+            self._hold_states[button]["hold_time"] = now
+        else:
+            self._hold_states[button]["hold_time"] = 0
+
+    def get_hold_start(self, button):
+        return self._hold_states.get(button, {}).get("hold_start", False)
+
+    def get_hold_time(self, button):
+        return self._hold_states.get(button, {}).get("hold_time", 0)
 
     def get_button(self, status_byte):
         all_buttons = self._single_action_buttons | self._multiple_action_buttons
@@ -278,10 +315,10 @@ class BaseusOrangeDotAI(BasePointerDevice):
         status_byte = data[5]
 
         if status_byte == 0:
-            # Liberou botão: libera todos os botões que estavam ativos
-            for botao in list(self._button_states):
-                self._on_button_release(botao)
-            self._ultimo_botao_ativo = None
+            # Somente libera o botão que estava ativo
+            if self._ultimo_botao_ativo:
+                self._on_button_release(self._ultimo_botao_ativo)
+                self._ultimo_botao_ativo = None
             return
 
         button = self.get_button(status_byte)
@@ -304,13 +341,10 @@ class BaseusOrangeDotAI(BasePointerDevice):
             self._on_button_press(button)
 
     def executa_acao(self, button):
-        # now = time.time()
-        # self._ctx.log(f"TIME executa_acao({button}) {now}")
-        self._ctx.log(f"{button}")
-
         ow = self._ctx.overlay_window
         current_mode = self._ctx.overlay_window.current_mode()
 
+        self._ctx.log(f"{button}")
         match button:
             case "OK":
                 if current_mode == MODE_MOUSE:
@@ -333,17 +367,50 @@ class BaseusOrangeDotAI(BasePointerDevice):
                     ow.change_line_width(+1)
                 elif current_mode == MODE_SPOTLIGHT:
                     ow.change_spot_radius(+1)
+            case "MOUSE":
+                if not self.check_hold_repeat("MOUSE"):
+                    pass
+            case "MOUSE+hold":
+                self.set_hold_start("MOUSE")
+                # pode executar qualquer ação, talvez emitir outra ação se hold nao iniciar
+            case "MOUSE+release":
+                if self.end_hold_repeat("MOUSE"):
+                    self._ctx.log(f"Encerrado Repeat MOUSE")
+                else:
+                    self._ctx.log(f"-> MOUSE+release")
+            case "MOUSE+repeat":
+                pass
             case "MOUSE++":
                 if current_mode == MODE_MOUSE:
                     ow.set_last_pointer_mode()
                 else:
                     ow.switch_mode()
             case "MIC":
-                if current_mode in [MODE_PEN, MODE_LASER]:
-                    ow.next_color()
+                if not self.check_hold_repeat("MIC"):
+                    if current_mode in [MODE_PEN, MODE_LASER]:
+                        ow.next_color(+1)
+            case "MIC+hold":
+                self.set_hold_start("MIC")
+            case "MIC+release":
+                if self.end_hold_repeat("MIC"):
+                    self._ctx.log(f"Encerrado Repeat MIC")
+                else:
+                    self._ctx.log(f"-> MIC+release")
+            case "MIC+repeat":
+                pass
             case "LNG":
-                if current_mode in [MODE_PEN, MODE_LASER]:
-                    ow.next_color(-1)
+                if not self.check_hold_repeat("LNG"):
+                    if current_mode in [MODE_PEN, MODE_LASER]:
+                        ow.next_color(-1)
+            case "LNG+hold":
+                self.set_hold_start("LNG")
+            case "LNG+release":
+                if self.end_hold_repeat("LNG"):
+                    self._ctx.log(f"Encerrado Repeat LNG")
+                else:
+                    self._ctx.log(f"-> MIC+release")
+            case "LNG+repeat":
+                pass
             case "HGL":
                 if current_mode == MODE_MOUSE:
                     self.emit_key_press(self._ctx.ui, uinput.KEY_B)
