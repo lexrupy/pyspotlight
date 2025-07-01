@@ -1,4 +1,5 @@
 import os
+import time
 import pyudev
 import glob
 import threading
@@ -99,6 +100,7 @@ class DeviceMonitor:
 
         if action == "add":
             if path.startswith("/dev/hidraw") or path.startswith("/dev/input"):
+                time.sleep(0.3)
                 for dev in self.get_monitored_devices():
                     if dev.known_path(path):
                         return  # já monitorado
