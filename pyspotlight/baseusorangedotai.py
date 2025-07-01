@@ -52,6 +52,7 @@ class BaseusOrangeDotAI(BasePointerDevice):
             # 120: "VOL_UP", # MONITORADO EM INPUT EVENTS
             # 121: "VOL_DOWN", # MONITORADO EM INPUT EVENTS
         }
+        self._virtual_hold_buttons = {"VOL_UP", "VOL_DOWN"}
 
     def _build_button_name(self, button, long_press=False, repeat=False):
         parts = [button]
@@ -61,59 +62,146 @@ class BaseusOrangeDotAI(BasePointerDevice):
             parts.append("hold")
         return "+".join(parts)
 
-    def _on_button_press(self, button):
+    def _on_button_press(self, botao):
         now = time.time()
-        last_click_time = self._last_click_time.get(button, 0)
-        interval = now - last_click_time
+        last_click = self._last_click_time.get(botao, 0)
+        time_since_last = now - last_click
 
-        is_second_click = 0 < interval < self.DOUBLE_CLICK_INTERVAL
+        is_second_click = (
+            0 < time_since_last < self.DOUBLE_CLICK_INTERVAL
+            and self._last_release_time.get(botao, 0) > 0
+        )
 
-        if is_second_click:
-            timer = self._pending_click_timers.pop(button, None)
+        self._last_click_time[botao] = now
+
+        state = {
+            "start_time": now,
+            "long_pressed": False,
+            "repeat_active": False,
+            "is_second_click": is_second_click,
+        }
+
+        def set_long_pressed():
+            state["long_pressed"] = True
+            timer = self._pending_click_timers.pop(botao, None)
             if timer:
                 timer.cancel()
-            self.executa_acao(f"{button}++")
+            button_name = self._build_button_name(botao, long_press=True)
+            if is_second_click:
+                with self._lock:
+                    state["repeat_active"] = True
+                self._repeat_timer(botao)
+            else:
+                self.executa_acao(button_name)
+
+        long_timer = threading.Timer(self.LONG_PRESS_INTERVAL, set_long_pressed)
+        long_timer.start()
+        state["long_timer"] = long_timer
+
+        self._button_states[botao] = state
+
+        # Cancelar clique simples pendente se houver
+        if botao in self._pending_click_timers:
+            self._pending_click_timers[botao].cancel()
+            del self._pending_click_timers[botao]
+
+        # Agenda clique simples só se não for second click
+        if not is_second_click:
+
+            def emitir_clique_simples():
+                current_state = self._button_states.get(botao)
+                if current_state is None or (
+                    not current_state["long_pressed"]
+                    and not current_state["repeat_active"]
+                ):
+                    self.executa_acao(botao)
+                self._pending_click_timers.pop(botao, None)
+
+            click_timer = threading.Timer(
+                self.LONG_PRESS_INTERVAL, emitir_clique_simples
+            )
+            click_timer.start()
+            self._pending_click_timers[botao] = click_timer
+
+    def _on_button_release(self, botao):
+        state = self._button_states.pop(botao, None)
+        if not state:
             return
 
-        self._last_click_time[button] = now
+        if "long_timer" in state:
+            state["long_timer"].cancel()
 
-        def emitir_clique_simples():
-            # Só dispara se não houve cancelamento (clique duplo)
-            if self._pending_click_timers.pop(button, None):
-                self.executa_acao(button)
-
-        timer = threading.Timer(self.DOUBLE_CLICK_INTERVAL, emitir_clique_simples)
-        self._pending_click_timers[button] = timer
-        timer.start()
-
-    def _on_button_release(self, button):
-        # Cancela clique pendente se existir
-        # timer = self._pending_click_timers.pop(button, None)
-        # if timer:
-        #     timer.cancel()
-
-        # Atualiza tempo de release para controle externo, se precisar
-        self._last_release_time[button] = time.time()
-
-        # Remove estado do botão (caso use algum)
-        self._button_states.pop(button, None)
-
-    def _repeat_timer(self, button):
         with self._lock:
-            state = self._button_states.get(button)
+            if "repeat_timer" in state:
+                state["repeat_timer"].cancel()
+
+        now = time.time()
+        duration = now - state["start_time"]
+        last_release = self._last_release_time.get(botao, 0)
+
+        self._last_release_time[botao] = now
+
+        if (
+            last_release > 0
+            and (now - last_release) < self.DOUBLE_CLICK_INTERVAL
+            and duration < self.LONG_PRESS_INTERVAL
+            and not state["long_pressed"]
+        ):
+            self.executa_acao(f"{botao}++")
+            return
+
+        # Caso 2: já emitiu long ou repeat, então não faz mais nada
+        if state["long_pressed"] or state["repeat_active"]:
+            self.executa_acao(f"{botao}+release")
+            return
+
+    def _repeat_timer(self, botao):
+        with self._lock:
+            state = self._button_states.get(botao)
             if not state or not state.get("repeat_active"):
                 return
-            button_name = self._build_button_name(button, repeat=True)
-        self.executa_acao(button_name)
+            button = self._build_button_name(botao, repeat=True)
+        self.executa_acao(button)
         # Reagenda fora do lock para evitar deadlock
-        t = threading.Timer(self.REPEAT_INTERVAL, self._repeat_timer, args=(button,))
+        t = threading.Timer(self.REPEAT_INTERVAL, self._repeat_timer, args=(botao,))
         with self._lock:
             # Verifica novamente antes de armazenar/agendar
-            state = self._button_states.get(button)
+            state = self._button_states.get(botao)
             if not state or not state.get("repeat_active"):
                 return
             state["repeat_timer"] = t
             t.start()
+
+    def _start_hold_repeat(self, button):
+        with self._lock:
+            estado = self._button_states.get(button)
+            if not estado:
+                estado = {
+                    "repeat_active": True,
+                    "hold_active": True,
+                    "start_time": time.time(),
+                }
+                self._button_states[button] = estado
+            else:
+                estado["repeat_active"] = True
+                estado["hold_active"] = True
+
+        # Inicia o timer de repeat
+        self._repeat_timer(button)
+
+    def _end_hold_repeat(self, button):
+        with self._lock:
+            estado = self._button_states.get(button)
+            if not estado:
+                return
+            estado["repeat_active"] = False
+            estado["hold_active"] = False
+            repeat_timer = estado.get("repeat_timer")
+            if repeat_timer:
+                repeat_timer.cancel()
+                del estado["repeat_timer"]
+
+        # self.executa_acao(f"{button}+release")
 
     def get_button(self, status_byte):
         all_buttons = self._single_action_buttons | self._multiple_action_buttons
