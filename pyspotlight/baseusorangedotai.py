@@ -58,18 +58,16 @@ class BaseusOrangeDotAI(BasePointerDevice):
         if repeat:
             parts.append("repeat")
         elif long_press:
-            parts.append("long")
+            parts.append("hold")
         return "+".join(parts)
 
     def _on_button_press(self, button):
         now = time.time()
         last_click_time = self._last_click_time.get(button, 0)
-
         interval = now - last_click_time
 
         is_second_click = 0 < interval < self.DOUBLE_CLICK_INTERVAL
 
-        # Se for segundo clique, dispara ++ e cancela o anterior
         if is_second_click:
             timer = self._pending_click_timers.pop(button, None)
             if timer:
@@ -79,9 +77,8 @@ class BaseusOrangeDotAI(BasePointerDevice):
 
         self._last_click_time[button] = now
 
-        # Caso contrário, agenda clique simples
         def emitir_clique_simples():
-            # Garante que nenhum clique duplo ou long foi disparado
+            # Só dispara se não houve cancelamento (clique duplo)
             if self._pending_click_timers.pop(button, None):
                 self.executa_acao(button)
 
@@ -89,7 +86,17 @@ class BaseusOrangeDotAI(BasePointerDevice):
         self._pending_click_timers[button] = timer
         timer.start()
 
-        # self._ctx.log(f"TIME _on_button_press: {now}")
+    def _on_button_release(self, button):
+        # Cancela clique pendente se existir
+        # timer = self._pending_click_timers.pop(button, None)
+        # if timer:
+        #     timer.cancel()
+
+        # Atualiza tempo de release para controle externo, se precisar
+        self._last_release_time[button] = time.time()
+
+        # Remove estado do botão (caso use algum)
+        self._button_states.pop(button, None)
 
     def _repeat_timer(self, button):
         with self._lock:
@@ -107,28 +114,6 @@ class BaseusOrangeDotAI(BasePointerDevice):
                 return
             state["repeat_timer"] = t
             t.start()
-
-    def _on_button_release(self, button):
-        state = self._button_states.pop(button, None)
-        if not state:
-            return
-
-        if "long_timer" in state:
-            state["long_timer"].cancel()
-
-        with self._lock:
-            if "repeat_timer" in state:
-                state["repeat_timer"].cancel()
-
-        now = time.time()
-
-        self._last_release_time[button] = now
-
-        # Cancela qualquer clique simples pendente que ainda não foi cancelado
-        timer = self._pending_click_timers.pop(button, None)
-        if timer:
-            timer.cancel()
-        # self._ctx.log(f"TIME _on_button_release: {now}")
 
     def get_button(self, status_byte):
         all_buttons = self._single_action_buttons | self._multiple_action_buttons
