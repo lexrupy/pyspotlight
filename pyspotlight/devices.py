@@ -67,8 +67,8 @@ class DeviceMonitor:
     def get_monitored_devices(self):
         return list(self._monitored_devices.values())
 
-    def get_compatible_devices(self):
-        return [d for d in self.devices if d.is_compatible()]
+    # def get_compatible_devices(self):
+    #     return [d for d in self.devices if d.is_compatible()]
 
     def register_hotplug_callback(self, callback):
         self._hotplug_callbacks.append(callback)

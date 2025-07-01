@@ -427,6 +427,13 @@ class BaseusOrangeDotAI(BasePointerDevice):
                 else:
                     ow.zoom(-1)
 
+    @classmethod
+    def device_filter(cls, device_info, udevadm_output):
+        # Only InterfaceProtocol 02 returns relevant info
+        if "hidraw" in device_info:
+            return 'attrs{binterfaceprotocol}=="02"' in udevadm_output
+        return True
+
     def handle_event(self, event):
         if event.type == ec.EV_REL:  # Movimento de Mouse
             # Repassa evento virtual

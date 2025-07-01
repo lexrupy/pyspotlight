@@ -18,6 +18,9 @@ class SingletonMeta(type):
 
 
 class BasePointerDevice(metaclass=SingletonMeta):
+    VENDOR_ID = None
+    PRODUCT_ID = None
+
     def __init__(self, app_ctx, hidraw_path):
         self.path = hidraw_path
 
@@ -74,7 +77,7 @@ class BasePointerDevice(metaclass=SingletonMeta):
             or not self._event_thread
             or not self._event_thread.is_alive()
         ):
-            self._ctx.log(f"* Reiniciando monitoramento para {self.display_name()}")
+            self._ctx.log(f"* Monitorando {self.display_name()}")
             self.monitor()
 
     def known_path(self, path):
@@ -132,6 +135,10 @@ class BasePointerDevice(metaclass=SingletonMeta):
         return self.__class__.__name__  # Fallback genérico
 
     @classmethod
+    def device_filter(cls, device_info, udevadm_output) -> bool:
+        return True
+
+    @classmethod
     def is_known_device(cls, device_info):
         try:
             output = subprocess.check_output(
@@ -139,7 +146,8 @@ class BasePointerDevice(metaclass=SingletonMeta):
             ).lower()
             vid = f"{cls.VENDOR_ID:04x}"
             pid = f"{cls.PRODUCT_ID:04x}"
-            return vid in output and pid in output
+            known_device = vid in output and pid in output
+            return known_device and cls.device_filter(device_info, output)
         except subprocess.CalledProcessError:
             return False
 
