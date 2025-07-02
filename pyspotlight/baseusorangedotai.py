@@ -441,8 +441,6 @@ class BaseusOrangeDotAI(BasePointerDevice):
                 pass
             case "LNG":
                 if not self.check_hold_repeat("LNG"):
-
-                    self._ctx.log("-> LNG")
                     if current_mode == MODE_LASER:
                         ow.next_laser_color(-1)
                     elif current_mode == MODE_PEN:

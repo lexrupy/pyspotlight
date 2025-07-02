@@ -99,7 +99,7 @@ class SpotlightOverlayWindow(QWidget):
 
         self.cursor_pos = None  # Usado para exibir a caneta
 
-        self.load_config()
+        # self.load_config()
 
         self.timer = QTimer()
         self.timer.timeout.connect(self.update)
@@ -117,6 +117,7 @@ class SpotlightOverlayWindow(QWidget):
 
     def save_config(self):
         config = configparser.ConfigParser()
+        self._ctx.log(f"{config}")
 
         config["Overlay"] = {
             "spot_radius": str(self.spot_radius),
@@ -139,6 +140,7 @@ class SpotlightOverlayWindow(QWidget):
             config.write(f)
 
     def load_config(self):
+
         config = configparser.ConfigParser()
         if not os.path.exists(CONFIG_PATH):
             return  # Nenhum arquivo ainda
@@ -204,6 +206,9 @@ class SpotlightOverlayWindow(QWidget):
         self.overlay_color = QColor(r, g, b, a)
         self.update()
 
+    def laser_inverted(self):
+        return self.laser_index == len(self.laser_colors) - 1
+
     def set_spotlight_mode(self):
         self.switch_mode(direct_mode=MODE_SPOTLIGHT)
 
@@ -224,6 +229,8 @@ class SpotlightOverlayWindow(QWidget):
         if self.mode == MODE_MAG_GLASS:
             if self.zoom_factor <= self.zoom_min:
                 self.zoom_factor = self.zoom_min
+            self.capture_screenshot()
+        elif self.mode == MODE_LASER and self.laser_inverted():
             self.capture_screenshot()
         elif self.mode != MODE_MOUSE:
             self.showFullScreen()
@@ -293,10 +300,14 @@ class SpotlightOverlayWindow(QWidget):
                 self.zoom_factor = self.zoom_min
             self.capture_screenshot()
         else:
+
             # TODO: Capture Screenshot if defined in config, can be util for some composite configs
-            # self.capture_screenshot()
-            self.showFullScreen()
-            self.update()
+            if self.mode == MODE_LASER and self.laser_inverted():
+                self.capture_screenshot()
+            else:
+                # self.capture_screenshot()
+                self.showFullScreen()
+                self.update()
 
     def change_laser_size(self, delta: int):
         min_size = 5
@@ -330,6 +341,10 @@ class SpotlightOverlayWindow(QWidget):
 
     def next_laser_color(self, step=1):
         self.laser_index = (self.laser_index + step) % len(self.laser_colors)
+        if self.laser_inverted():
+            self.capture_screenshot()
+        else:
+            self.clear_pixmap()
         self.update()
 
     def next_pen_color(self, step=1):
@@ -668,9 +683,9 @@ class SpotlightOverlayWindow(QWidget):
         self.last_key_pressed = key
 
     def closeEvent(self, event):
-        self.save_config()
+        # self.save_config()
         event.accept()
 
     def quit(self):
-        self.save_config()
+        # self.save_config()
         self.set_mouse_mode()

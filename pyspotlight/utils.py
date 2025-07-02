@@ -18,7 +18,7 @@ MODE_MAP = {
     MODE_SPOTLIGHT: "Spotlight",
     MODE_LASER: "Laser",
     MODE_PEN: "Marcador",
-    MODE_MAG_GLASS: "Lente de Aumento",
+    MODE_MAG_GLASS: "Lente",
 }
 
 

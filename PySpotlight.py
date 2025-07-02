@@ -75,6 +75,14 @@ class PySpotlightApp(QMainWindow):
     def emit_refresh_devices_signal(self):
         self.refresh_devices_signal.emit()
 
+    def load_config(self):
+        if self.ctx and self.ctx.overlay_window:
+            self.ctx.overlay_window.load_config()
+
+    def save_config(self):
+        if self.ctx and self.ctx.overlay_window:
+            self.ctx.overlay_window.save_config()
+
     def init_ui(self):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -147,7 +155,6 @@ class PySpotlightApp(QMainWindow):
     def create_overlay(self):
         screen_index = self.ctx.selected_screen
         screenshot, geometry = capture_monitor_screenshot(screen_index)
-        # Fecha janela anterior se existir
         if self.ctx.overlay_window:
             self.ctx.overlay_window.monitor_index = screen_index
             self.ctx.overlay_window.setGeometry(geometry)
@@ -158,6 +165,8 @@ class PySpotlightApp(QMainWindow):
                 screen_geometry=geometry,
                 monitor_index=screen_index,
             )
+
+        self.ctx.overlay_window.load_config()
 
     def setup_info_overlay(self):
         # Pega o monitor que não está sendo usado pelo spotlight
@@ -282,6 +291,7 @@ class PySpotlightApp(QMainWindow):
         self.running = False
         if self.icon:
             self.icon.stop()
+        self.save_config()
         QApplication.quit()
 
 
