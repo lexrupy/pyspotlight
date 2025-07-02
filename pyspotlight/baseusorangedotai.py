@@ -9,6 +9,7 @@ from pyspotlight.utils import (
     MODE_MOUSE,
     MODE_PEN,
     MODE_SPOTLIGHT,
+    MODE_MAG_GLASS,
 )
 from .pointerdevice import BasePointerDevice
 
@@ -28,6 +29,7 @@ class BaseusOrangeDotAI(BasePointerDevice):
             MODE_SPOTLIGHT,
             MODE_LASER,
             MODE_PEN,
+            MODE_MAG_GLASS,
         ]
         self._last_click_time = {}
         self._last_release_time = {}
@@ -411,15 +413,14 @@ class BaseusOrangeDotAI(BasePointerDevice):
             case "MOUSE+hold":
                 self.set_hold_start("MOUSE")
                 if ow.auto_mode_enabled:
-                    if current_mode != ow.last_pointer_mode:
-                        ow.set_last_pointer_mode()
+                    ow.show_overlay()
                 # pode executar qualquer ação, talvez emitir outra ação se hold nao iniciar
             case "MOUSE+release":
                 if self.end_hold_repeat("MOUSE"):
                     self._ctx.log(f"Encerrado Repeat MOUSE")
                 else:
                     if ow.auto_mode_enabled:
-                        ow.set_mouse_mode()
+                        ow.hide_overlay()
             case "MOUSE+repeat":
                 pass
             case "MOUSE++":
@@ -477,11 +478,11 @@ class BaseusOrangeDotAI(BasePointerDevice):
                     self.emit_key_press(self._ctx.ui, uinput.KEY_VOLUMEUP)
                 elif current_mode == MODE_PEN:
                     ow.change_line_width(+1)
-                elif current_mode == MODE_SPOTLIGHT:
+                elif current_mode == MODE_MAG_GLASS:
                     ow.zoom(+1)
 
             case "VOL_UP+repeat":
-                if current_mode == MODE_SPOTLIGHT:
+                if current_mode in [MODE_SPOTLIGHT, MODE_MAG_GLASS]:
                     ow.change_spot_radius(+1)
                 elif current_mode == MODE_LASER:
                     ow.change_laser_size(+1)
@@ -490,10 +491,10 @@ class BaseusOrangeDotAI(BasePointerDevice):
                     self.emit_key_press(self._ctx.ui, uinput.KEY_VOLUMEDOWN)
                 elif current_mode == MODE_PEN:
                     ow.change_line_width(-1)
-                else:
+                elif current_mode == MODE_MAG_GLASS:
                     ow.zoom(-1)
             case "VOL_DOWN+repeat":
-                if current_mode == MODE_SPOTLIGHT:
+                if current_mode in [MODE_SPOTLIGHT, MODE_MAG_GLASS]:
                     ow.change_spot_radius(-1)
                 elif current_mode == MODE_LASER:
                     ow.change_laser_size(-1)

@@ -3,7 +3,12 @@ import uinput
 import evdev.ecodes as ec
 import threading
 
-from pyspotlight.utils import MODE_LASER, MODE_MOUSE, MODE_PEN, MODE_SPOTLIGHT
+from pyspotlight.utils import (
+    MODE_LASER,
+    MODE_MAG_GLASS,
+    MODE_MOUSE,
+    MODE_SPOTLIGHT,
+)
 from .pointerdevice import BasePointerDevice
 
 
@@ -32,7 +37,12 @@ class GenericVRBoxPointer(BasePointerDevice):
         self._last_release_time = {}
         self._pending_click_timers = {}  # botao: threading.Timer
         self._lock = threading.Lock()
-        self._ctx.compatible_modes = [MODE_MOUSE, MODE_SPOTLIGHT, MODE_LASER]
+        self._ctx.compatible_modes = [
+            MODE_MOUSE,
+            MODE_SPOTLIGHT,
+            MODE_LASER,
+            MODE_MAG_GLASS,
+        ]
 
     def _build_button_name(self, button, long_press=False, repeat=False):
         parts = [button]

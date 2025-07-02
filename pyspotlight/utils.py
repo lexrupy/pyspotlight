@@ -10,13 +10,15 @@ MODE_MOUSE = 0
 MODE_SPOTLIGHT = 1
 MODE_LASER = 2
 MODE_PEN = 3
+MODE_MAG_GLASS = 4
 
 
 MODE_MAP = {
-    MODE_MOUSE: "Modo Mouse",
-    MODE_SPOTLIGHT: "Modo Spotlight",
-    MODE_LASER: "Modo Laser",
-    MODE_PEN: "Modo Marcador",
+    MODE_MOUSE: "Mouse",
+    MODE_SPOTLIGHT: "Spotlight",
+    MODE_LASER: "Laser",
+    MODE_PEN: "Marcador",
+    MODE_MAG_GLASS: "Lente de Aumento",
 }
 
 

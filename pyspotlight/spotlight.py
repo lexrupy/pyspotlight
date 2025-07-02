@@ -19,6 +19,7 @@ from .utils import (
     MODE_SPOTLIGHT,
     MODE_PEN,
     MODE_LASER,
+    MODE_MAG_GLASS,
     MODE_MOUSE,
 )
 
@@ -43,21 +44,24 @@ class SpotlightOverlayWindow(QWidget):
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.setCursor(Qt.BlankCursor)
 
         self.mode = MODE_MOUSE
         self.last_pointer_mode = MODE_SPOTLIGHT
 
-        self.auto_mode_enabled = False
+        self.auto_mode_enabled = True
+        self.mag_is_square = True
+        self.mag_aspect_ratio = 0.65
 
         self.last_key_time = 0
         self.last_key_pressed = 0
 
         self.default_spot_radius = 150
         self.spot_radius = 150
-        self.zoom_factor = 1.0
+        self.zoom_factor = 2.0
         self.zoom_max = 10.0
-        self.zoom_min = 1.0
+        self.zoom_min = 2.0
         self.overlay_alpha = 200
         self.overlay_color = QColor(10, 10, 10, self.overlay_alpha)
         self.monitor_index = monitor_index
@@ -73,7 +77,7 @@ class SpotlightOverlayWindow(QWidget):
             QColor(255, 255, 255),  # Branco
             QColor(0, 0, 0),  # Preto
             # SE INCLUIR MAIS CORES MANTER ESTA A ÚLTIMA
-            QColor(0, 0, 0, 0),  # Preto
+            QColor(0, 0, 0, 0),  # Preto Transparente
         ]
 
         self.pen_colors = self.laser_colors[:-1]
@@ -87,7 +91,9 @@ class SpotlightOverlayWindow(QWidget):
         self.current_line_width = 3
 
         self.setGeometry(screen_geometry)
-        self.pixmap = QPixmap.fromImage(screenshot)
+
+        # self.pixmap = QPixmap.fromImage(screenshot)
+        self.clear_pixmap()
 
         self.pen_color = self.pen_colors[self.pen_index]
 
@@ -102,6 +108,10 @@ class SpotlightOverlayWindow(QWidget):
         self.center_screen = self.geometry().center()
         QCursor.setPos(self.center_screen)
 
+    def clear_pixmap(self):
+        self.pixmap = QPixmap(self.size())
+        self.pixmap.fill(Qt.transparent)
+
     def current_mode(self):
         return self.mode
 
@@ -111,6 +121,7 @@ class SpotlightOverlayWindow(QWidget):
         config["Overlay"] = {
             "spot_radius": str(self.spot_radius),
             "zoom_factor": str(self.zoom_factor),
+            "mag_aspect_ratio": str(self.mag_aspect_ratio),
             "overlay_alpha": str(self.overlay_alpha),
             "overlay_r": str(self.overlay_color.red()),
             "overlay_g": str(self.overlay_color.green()),
@@ -143,6 +154,9 @@ class SpotlightOverlayWindow(QWidget):
             )
             self.overlay_alpha = int(
                 config["Overlay"].get("overlay_alpha", self.overlay_alpha)
+            )
+            self.mag_aspect_ratio = float(
+                config["Overlay"].get("mag_aspect_ratio", self.mag_aspect_ratio)
             )
 
             r = int(config["Overlay"].get("overlay_r", 10))
@@ -196,6 +210,18 @@ class SpotlightOverlayWindow(QWidget):
     def set_pen_mode(self):
         self.switch_mode(direct_mode=MODE_PEN)
 
+    def hide_overlay(self):
+        self.clear_pixmap()
+        self.hide()
+
+    def show_overlay(self):
+        if self.mode == MODE_MAG_GLASS:
+            if self.zoom_factor <= self.zoom_min:
+                self.zoom_factor = self.zoom_min
+            self.capture_screenshot()
+        elif self.mode != MODE_MOUSE:
+            self.showFullScreen()
+
     def set_last_pointer_mode(self):
         if self.last_pointer_mode in self._ctx.compatible_modes:
             self.switch_mode(direct_mode=self.last_pointer_mode)
@@ -203,8 +229,10 @@ class SpotlightOverlayWindow(QWidget):
     def set_auto_mode(self, enable=True):
         self.auto_mode_enabled = enable
         if enable:
-            self._ctx.show_info(f"{MODE_MAP[self.last_pointer_mode]} - AUTO")
+            self._ctx.show_info(f"Auto Mode")
+            self.hide_overlay()
         else:
+            self.show_overlay()
             self._ctx.show_info(f"{MODE_MAP[self.mode]}")
 
     def switch_mode(self, step=1, direct_mode=-1):
@@ -232,20 +260,33 @@ class SpotlightOverlayWindow(QWidget):
 
     def apply_mode_change(self, new_mode):
         last_mode = self.mode
+        if last_mode != new_mode and last_mode == MODE_MAG_GLASS:
+            self.clear_pixmap()
+
         self.mode = new_mode
+
+        if (
+            self.mode in [MODE_SPOTLIGHT, MODE_LASER, MODE_MAG_GLASS]
+            and last_mode != self.mode
+        ):
+            self.last_pointer_mode = self.mode
+
+        self._ctx.show_info(f"Modo {MODE_MAP[self.mode]}")
+
+        if self.auto_mode_enabled:
+            return
 
         if self.mode == MODE_MOUSE:
             self.hide()
-        else:
+        elif self.mode == MODE_MAG_GLASS:
+            if self.zoom_factor <= self.zoom_min:
+                self.zoom_factor = self.zoom_min
             self.capture_screenshot()
+        else:
+            # TODO: Capture Screenshot if defined in config, can be util for some composite configs
+            # self.capture_screenshot()
+            self.showFullScreen()
             self.update()
-
-        if self.mode in [MODE_SPOTLIGHT, MODE_LASER] and last_mode != self.mode:
-            self.last_pointer_mode = self.mode
-
-        # self._ctx.log(f"Modo atual: {MODE_MAP[self.mode]}")
-        if not self.auto_mode_enabled:
-            self._ctx.show_info(MODE_MAP[self.mode])
 
     def change_laser_size(self, delta: int):
         min_size = 5
@@ -270,7 +311,7 @@ class SpotlightOverlayWindow(QWidget):
         self.update()
 
     def zoom(self, direction):
-        if self.mode == MODE_SPOTLIGHT:
+        if self.mode == MODE_MAG_GLASS:
             if direction > 0:
                 self.zoom_factor = min(self.zoom_max, self.zoom_factor + 1.0)
             else:
@@ -324,50 +365,68 @@ class SpotlightOverlayWindow(QWidget):
         # Mostra a janela overlay novamente
         self.showFullScreen()
 
-    def drawSpotlight(self, painter, cursor_pos):
-        if self.zoom_factor > 1.0:
-            # --- Lente com zoom sem overlay ---
-            src_size = int((self.spot_radius * 2) / self.zoom_factor)
-            half = src_size // 2
-            src_rect = QRect(
-                cursor_pos.x() - half, cursor_pos.y() - half, src_size, src_size
-            )
-            src_rect = src_rect.intersected(self.pixmap.rect())
+    def drawMagnifyingGlass(self, painter, cursor_pos):
+        radius = self.spot_radius
 
-            dest_size = self.spot_radius * 2
-            dest_rect = QRect(
-                cursor_pos.x() - self.spot_radius,
-                cursor_pos.y() - self.spot_radius,
-                dest_size,
-                dest_size,
-            )
+        if self.mag_is_square:
+            width = radius * 2
+            height = int(width * self.mag_aspect_ratio)
+            is_ellipse = False
+        else:
+            width = height = radius * 2
+            is_ellipse = True
 
+        # Cálculo da área de origem (reduzida pela ampliação)
+        src_width = int(width / self.zoom_factor)
+        src_height = int(height / self.zoom_factor)
+
+        src_rect = QRect(
+            cursor_pos.x() - src_width // 2,
+            cursor_pos.y() - src_height // 2,
+            src_width,
+            src_height,
+        ).intersected(self.pixmap.rect())
+
+        dest_rect = QRect(
+            cursor_pos.x() - width // 2,
+            cursor_pos.y() - height // 2,
+            width,
+            height,
+        )
+
+        if is_ellipse:
             clip_path = QPainterPath()
-            clip_path.addEllipse(cursor_pos, self.spot_radius, self.spot_radius)
+            clip_path.addEllipse(dest_rect)
             painter.setClipPath(clip_path)
-            painter.drawPixmap(dest_rect, self.pixmap, src_rect)
+
+        painter.drawPixmap(dest_rect, self.pixmap, src_rect)
+
+        if is_ellipse:
             painter.setClipping(False)
 
-            # Borda translúcida ao redor da lente
-            border_color = QColor(self.pen_colors[self.pen_index])
-            border_color.setAlphaF(0.3)
-            pen = QPen(border_color, 6)
-            painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
-            painter.setRenderHint(QPainter.Antialiasing)
-            painter.drawEllipse(cursor_pos, self.spot_radius, self.spot_radius)
+        # Borda branca
+        border_color = QColor(255, 255, 255, 180)
+        pen = QPen(border_color, 2 if not is_ellipse else 4)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.setRenderHint(QPainter.Antialiasing)
 
+        if is_ellipse:
+            painter.drawEllipse(dest_rect)
         else:
-            # Spotlight tradicional com overlay escuro
-            painter.setBrush(self.overlay_color)
-            painter.setPen(Qt.NoPen)
+            painter.drawRect(dest_rect)
 
-            spotlight_path = QPainterPath()
-            spotlight_path.addRect(QRectF(self.rect()))
-            spotlight_path.addEllipse(cursor_pos, self.spot_radius, self.spot_radius)
+    def drawSpotlight(self, painter, cursor_pos):
+        # Spotlight tradicional com overlay escuro
+        painter.setBrush(self.overlay_color)
+        painter.setPen(Qt.NoPen)
 
-            painter.setRenderHint(QPainter.Antialiasing)
-            painter.drawPath(spotlight_path)
+        spotlight_path = QPainterPath()
+        spotlight_path.addRect(QRectF(self.rect()))
+        spotlight_path.addEllipse(cursor_pos, self.spot_radius, self.spot_radius)
+
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.drawPath(spotlight_path)
 
     def drawLaser(self, painter, cursor_pos):
         size = self.laser_size
@@ -482,6 +541,8 @@ class SpotlightOverlayWindow(QWidget):
             self.drawLaser(painter, cursor_pos)
         elif self.mode == MODE_PEN:
             self.drawLines(painter, cursor_pos)
+        elif self.mode == MODE_MAG_GLASS:
+            self.drawMagnifyingGlass(painter, cursor_pos)
 
     def draw_pen_tip(self, painter, pos, size=20):
         # Pontos do SVG com a ponta em (0, 0)
