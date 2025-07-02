@@ -62,8 +62,8 @@ class PySpotlightApp(QMainWindow):
         self.device_monitor = DeviceMonitor(self.ctx)
 
         self.info_overlay = None
-        if len(QGuiApplication.screens()) >= 1:
-            self.setup_info_overlay()
+        # if len(QGuiApplication.screens()) >= 1:
+        self.setup_info_overlay()
 
         self.init_ui()
         self.refresh_screens()
