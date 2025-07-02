@@ -38,6 +38,7 @@ class BaseusOrangeDotAI(BasePointerDevice):
         self._ultimo_botao_ativo = None
         self._lock = threading.Lock()
         self._hold_states = {}
+        self._was_last_esc = False
 
         self._single_action_buttons = {
             97: "OK",
@@ -63,10 +64,10 @@ class BaseusOrangeDotAI(BasePointerDevice):
             122: "LNG",
             # botoes tratados em input events pois se comportam de forma estranha em hidraw quanto ao press/release
             # 103: "HGL", # MONITORADO EM INPUT EVENTS
-            # 120: "VOL_UP", # MONITORADO EM INPUT EVENTS
-            # 121: "VOL_DOWN", # MONITORADO EM INPUT EVENTS
+            120: "VOL_UP",  # MONITORADO TAMBÉM EM INPUT EVENTS, LA RETORNA VOL_UP
+            121: "VOL_DOWN",  # MONITORADO TAMBÉM EM INPUT EVENTS, LA RETORNA VOL_DOWN
         }
-        self._virtual_repeat_buttons = {"MIC", "LNG", "MOUSE"}
+        self._virtual_repeat_buttons = {"MIC", "LNG", "MOUSE", "VOL_UP", "VOL_DOWN"}
 
     def _build_button_name(self, button, long_press=False, repeat=False):
         parts = [button]
@@ -371,42 +372,39 @@ class BaseusOrangeDotAI(BasePointerDevice):
         # self._ctx.log(f"{button}")
         match button:
             case "OK":
-                if current_mode == MODE_MOUSE:
-                    self.emit_key_press(self._ctx.ui, uinput.BTN_LEFT)
-                else:
+                if ow.isVisible():
                     ow.switch_mode()
+                else:
+                    self.emit_key_press(uinput.BTN_LEFT)
             case "OK++":
-                ow.switch_mode()
+                if ow.isVisible():
+                    ow.switch_mode()
+                else:
+                    self.emit_key_chord([uinput.KEY_LEFTALT, uinput.KEY_TAB])
             case "OK+long":
                 ow.set_auto_mode(not ow.auto_mode_enabled)
             case "LASER":
-                # ow.set_last_pointer_mode()
                 pass
             case "PREV":
-                if current_mode == MODE_MOUSE:
-                    self.emit_key_press(self._ctx.ui, uinput.KEY_PAGEUP)
-                # elif current_mode == MODE_PEN:
-                #     ow.change_line_width(-1)
-                # elif current_mode == MODE_SPOTLIGHT:
-                #     ow.change_spot_radius(-1)
+                if ow.isVisible():
+                    # When not visible, already emit KEY_PAGEUP
+                    pass
             case "PREV+long":
-                if current_mode == MODE_MOUSE:
-                    self.emit_key_press(self._ctx.ui, uinput.KEY_ESC)
-                else:
-                    ow.switch_mode(direct_mode=MODE_MOUSE)
-
+                if not ow.isVisible():
+                    if self._was_last_esc:
+                        self.emit_key_chord([uinput.KEY_LEFTSHIFT, uinput.KEY_F5])
+                        self._was_last_esc = False
+                    else:
+                        self.emit_key_press(uinput.KEY_ESC)
+                        self._was_last_esc = True
+                # else:
+                #     ow.switch_mode(direct_mode=MODE_MOUSE)
             case "NEXT":
-                if current_mode == MODE_MOUSE:
-                    self.emit_key_press(self._ctx.ui, uinput.KEY_PAGEDOWN)
-                # elif current_mode == MODE_PEN:
-                #     ow.change_line_width(+1)
-                # elif current_mode == MODE_SPOTLIGHT:
-                #     ow.change_spot_radius(+1)
+                if ow.isVisible():
+                    # When not visible, already emit KEY_PAGEDOWN
+                    pass
             case "NEXT+long":
-                if current_mode == MODE_MOUSE:
-                    self.emit_key_chord(
-                        self._ctx.ui, [uinput.KEY_LEFTSHIFT, uinput.KEY_F5]
-                    )
+                pass
             case "MOUSE":
                 if not self.check_hold_repeat("MOUSE"):
                     pass
@@ -414,10 +412,9 @@ class BaseusOrangeDotAI(BasePointerDevice):
                 self.set_hold_start("MOUSE")
                 if ow.auto_mode_enabled:
                     ow.show_overlay()
-                # pode executar qualquer ação, talvez emitir outra ação se hold nao iniciar
             case "MOUSE+release":
                 if self.end_hold_repeat("MOUSE"):
-                    self._ctx.log(f"Encerrado Repeat MOUSE")
+                    pass
                 else:
                     if ow.auto_mode_enabled:
                         ow.hide_overlay()
@@ -432,72 +429,84 @@ class BaseusOrangeDotAI(BasePointerDevice):
                     elif current_mode == MODE_PEN:
                         ow.next_pen_color(+1)
                     elif current_mode == MODE_SPOTLIGHT:
-                        ow.adjust_overlay_color(step_color=+80)
+                        ow.set_overlay_color_white()
             case "MIC++":
-                if current_mode == MODE_SPOTLIGHT:
-                    ow.adjust_overlay_color(step_color=245, direct=True)
+                pass
             case "MIC+hold":
                 self.set_hold_start("MIC")
             case "MIC+release":
                 if self.end_hold_repeat("MIC"):
-                    self._ctx.log(f"Encerrado Repeat MIC")
-                else:
-                    self._ctx.log(f"-> MIC+release")
+                    pass
             case "MIC+repeat":
                 pass
             case "LNG":
                 if not self.check_hold_repeat("LNG"):
+
+                    self._ctx.log("-> LNG")
                     if current_mode == MODE_LASER:
                         ow.next_laser_color(-1)
                     elif current_mode == MODE_PEN:
                         ow.next_pen_color(-1)
                     elif current_mode == MODE_SPOTLIGHT:
-                        ow.adjust_overlay_color(step_color=-80)
+                        ow.set_overlay_color_black()
             case "LNG++":
-                if current_mode == MODE_SPOTLIGHT:
-                    ow.adjust_overlay_color(step_color=40, direct=True)
+                pass
             case "LNG+hold":
                 self.set_hold_start("LNG")
             case "LNG+release":
                 if self.end_hold_repeat("LNG"):
-                    self._ctx.log(f"Encerrado Repeat LNG")
-                else:
-                    self._ctx.log(f"-> LNG+release")
+                    pass
             case "LNG+repeat":
                 pass
             case "HGL":
-                if current_mode == MODE_MOUSE:
-                    self.emit_key_press(self._ctx.ui, uinput.KEY_B)
-                elif current_mode == MODE_PEN:
+                if current_mode == MODE_PEN:
                     ow.clear_drawing()
             case "HGL++":
                 if current_mode == MODE_PEN:
                     ow.clear_drawing(all=True)
+            case "VOL_UP+hold":
+                self.start_hold_repeat("VOL_UP")
+            case "VOL_UP+release":
+                if self.end_hold_repeat("VOL_UP"):
+                    pass
             case "VOL_UP":
-                if current_mode == MODE_MOUSE:
-                    self.emit_key_press(self._ctx.ui, uinput.KEY_VOLUMEUP)
-                elif current_mode == MODE_PEN:
-                    ow.change_line_width(+1)
+                if current_mode == MODE_PEN:
+                    ow.change_line_width(+2)
                 elif current_mode == MODE_MAG_GLASS:
                     ow.zoom(+1)
-
+                if current_mode == MODE_LASER:
+                    ow.change_laser_size(+10)
+                if current_mode == MODE_SPOTLIGHT:
+                    ow.change_spot_radius(+5)
             case "VOL_UP+repeat":
+                if current_mode == MODE_PEN:
+                    ow.change_line_width(+1)
+                if current_mode == MODE_LASER:
+                    ow.change_laser_size(+1)
                 if current_mode in [MODE_SPOTLIGHT, MODE_MAG_GLASS]:
                     ow.change_spot_radius(+1)
-                elif current_mode == MODE_LASER:
-                    ow.change_laser_size(+1)
             case "VOL_DOWN":
-                if current_mode == MODE_MOUSE:
-                    self.emit_key_press(self._ctx.ui, uinput.KEY_VOLUMEDOWN)
-                elif current_mode == MODE_PEN:
-                    ow.change_line_width(-1)
+                if current_mode == MODE_PEN:
+                    ow.change_line_width(-2)
                 elif current_mode == MODE_MAG_GLASS:
                     ow.zoom(-1)
+                if current_mode == MODE_LASER:
+                    ow.change_laser_size(-10)
+                if current_mode == MODE_SPOTLIGHT:
+                    ow.change_spot_radius(-5)
+
+            case "VOL_DOWN+hold":
+                self.start_hold_repeat("VOL_DOWN")
+            case "VOL_DOWN+release":
+                if self.end_hold_repeat("VOL_DOWN"):
+                    pass
             case "VOL_DOWN+repeat":
+                if current_mode == MODE_PEN:
+                    ow.change_line_width(-1)
+                if current_mode == MODE_LASER:
+                    ow.change_laser_size(-1)
                 if current_mode in [MODE_SPOTLIGHT, MODE_MAG_GLASS]:
                     ow.change_spot_radius(-1)
-                elif current_mode == MODE_LASER:
-                    ow.change_laser_size(-1)
 
     @classmethod
     def device_filter(cls, device_info, udevadm_output):
@@ -506,21 +515,45 @@ class BaseusOrangeDotAI(BasePointerDevice):
             return 'attrs{binterfaceprotocol}=="02"' in udevadm_output
         return True
 
+    def log_key(self, ev):
+        all_keys = ec.KEY | ec.BTN
+        if ev.value == 1:
+            direction = "down"
+        else:
+            direction = "up"
+        self._ctx.log(f"{all_keys[ev.code]} - {direction}")
+
     def handle_event(self, event):
         if event.type == ec.EV_REL:  # Movimento de Mouse
             # Repassa evento virtual
             self._ctx.ui.emit((event.type, event.code), event.value)
 
         elif event.type == ec.EV_KEY:
+            ow = self._ctx.overlay_window
             button = None
+
+            # self.log_key(event)
             match event.code:
-                case ec.BTN_LEFT | ec.BTN_RIGHT:
-                    # emite cliques, por enquanto
-                    self._ctx.ui.emit((event.type, event.code), event.value)
-                case ec.KEY_VOLUMEUP:
-                    button = "VOL_UP"
-                case ec.KEY_VOLUMEDOWN:
-                    button = "VOL_DOWN"
+                case (
+                    ec.KEY_VOLUMEUP
+                    | ec.KEY_VOLUMEDOWN
+                    | ec.KEY_B
+                    | ec.KEY_E
+                    | ec.KEY_PAGEDOWN
+                    | ec.KEY_PAGEUP
+                    # | ec.KEY_LEFTSHIFT
+                    # | ec.KEY_F5
+                    # | ec.KEY_ESC
+                    # | ec.KEY_TAB
+                    # | ec.BTN_RIGHT
+                    # | ec.BTN_LEFT
+                ):
+                    if ow and ow.isVisible():
+                        pass
+                    else:
+
+                        # Emit if overlay is not visible
+                        self._ctx.ui.emit((event.type, event.code), event.value)
                 case ec.KEY_E:
                     button = "HGL"
 

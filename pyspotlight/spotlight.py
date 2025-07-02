@@ -170,7 +170,13 @@ class SpotlightOverlayWindow(QWidget):
             self.laser_size = int(config["Laser"].get("laser_size", self.laser_size))
             self.pen_color = self.pen_colors[self.pen_index]
 
-    def adjust_overlay_color(self, step_color=0, step_alpha=0, direct=False):
+    def set_overlay_color_black(self):
+        self.adjust_overlay_color(step_color=0, direct=True)
+
+    def set_overlay_color_white(self):
+        self.adjust_overlay_color(step_color=255, direct=True)
+
+    def adjust_overlay_color(self, step_color=-256, step_alpha=-256, direct=False):
         r = self.overlay_color.red()
         g = self.overlay_color.green()
         b = self.overlay_color.blue()
@@ -187,11 +193,11 @@ class SpotlightOverlayWindow(QWidget):
             nb = b + step_color
             na = a + step_alpha
 
-        if step_color != 0:
+        if step_color >= -255:
             r = min(max(nr, 0), 255)
             g = min(max(ng, 0), 255)
             b = min(max(nb, 0), 255)
-        if step_alpha != 0:
+        if step_alpha >= -255:
             a = min(max(na, 0), 255)
             self.overlay_alpha = a  # mantém coerência com o atributo
 
@@ -243,7 +249,9 @@ class SpotlightOverlayWindow(QWidget):
             return
 
         if direct_mode >= 0:
-            if direct_mode in compatible:
+            if direct_mode in compatible and not (
+                direct_mode == MODE_PEN and self.auto_mode_enabled
+            ):
                 self.apply_mode_change(direct_mode)
             return
 
@@ -254,6 +262,8 @@ class SpotlightOverlayWindow(QWidget):
         for i in range(1, total_modes + 1):  # evita loop infinito
             next_index = (current_index + step * i) % total_modes
             next_mode = all_modes[next_index]
+            if next_mode == MODE_PEN and self.auto_mode_enabled:
+                continue  # pula MODE_PEN
             if next_mode in compatible:
                 self.apply_mode_change(next_mode)
                 return

@@ -163,11 +163,13 @@ class BasePointerDevice(metaclass=SingletonMeta):
         except subprocess.CalledProcessError:
             return False
 
-    def emit_key_press(self, ui, key):
+    def emit_key_press(self, key):
+        ui = self._ctx.ui
         ui.emit(key, 1)  # Pressiona
         ui.emit(key, 0)  # Solta
 
-    def emit_key_chord(self, ui, keys):
+    def emit_key_chord(self, keys):
+        ui = self._ctx.ui
         ui.emit(keys[0], 1)  # Pressiona primeira tecla, ex: SHIFT
         ui.emit(keys[1], 1)  # Pressiona segunda tecla ex: F5
         ui.emit(keys[1], 0)  # Solta segunda tecla
