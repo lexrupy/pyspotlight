@@ -14,6 +14,7 @@ class AppContext:
         self._overlay_window = overlay_window
         self._show_info_function = show_info_function
         self._compatible_modes = []
+        self._support_auto_mode = False
 
         self._active_device = None
 
@@ -46,12 +47,12 @@ class AppContext:
         self._ui = uid
 
     @property
-    def spx_proc(self):
-        return self._spx_proc
+    def support_auto_mode(self):
+        return self._support_auto_mode
 
-    @spx_proc.setter
-    def spx_proc(self, spxc):
-        self._spx_proc = spxc
+    @support_auto_mode.setter
+    def support_auto_mode(self, sam):
+        self._support_auto_mode = sam
 
     @property
     def selected_screen(self):

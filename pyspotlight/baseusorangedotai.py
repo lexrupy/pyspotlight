@@ -31,6 +31,7 @@ class BaseusOrangeDotAI(BasePointerDevice):
             MODE_PEN,
             MODE_MAG_GLASS,
         ]
+        self._ctx.support_auto_mode = True
         self._last_click_time = {}
         self._last_release_time = {}
         self._pending_click_timers = {}
@@ -382,7 +383,7 @@ class BaseusOrangeDotAI(BasePointerDevice):
                 else:
                     self.emit_key_chord([uinput.KEY_LEFTALT, uinput.KEY_TAB])
             case "OK+long":
-                ow.set_auto_mode(not ow.auto_mode_enabled)
+                ow.set_auto_mode(not ow.auto_mode_enabled())
             case "LASER":
                 pass
             case "PREV":
@@ -410,13 +411,13 @@ class BaseusOrangeDotAI(BasePointerDevice):
                     pass
             case "MOUSE+hold":
                 self.set_hold_start("MOUSE")
-                if ow.auto_mode_enabled:
+                if ow.auto_mode_enabled():
                     ow.show_overlay()
             case "MOUSE+release":
                 if self.end_hold_repeat("MOUSE"):
                     pass
                 else:
-                    if ow.auto_mode_enabled:
+                    if ow.auto_mode_enabled():
                         ow.hide_overlay()
             case "MOUSE+repeat":
                 pass
